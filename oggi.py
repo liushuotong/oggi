@@ -201,7 +201,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="oggi",
         description="OGGI pangenome pipeline: reduce -> identify -> subcoli -> cluster")
-    parser.add_argument("-V", "--version", action="version", version="oggi 1")
+    parser.add_argument("-v", "--version", action="version", version="oggi v1")
     sp = parser.add_subparsers(dest="module", metavar="<module>")
 
     add_reduce_parser(sp)
