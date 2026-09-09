@@ -72,16 +72,16 @@ def run_reduce(args):
             if args.skip_existing and os.path.exists(pep_out):
                 print("skip existing: %s" % pep_out)
             else:
-                subprocess.run(["agat_sp_keep_longest_isoform.pl", "-gff", gff,
+                subprocess.run(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
                                 "-o", prefix + ".gff"], check=True)
                 subprocess.run(["agat_sp_extract_sequences.pl",
-                                "-gff", prefix + ".gff",
-                                "-fasta", genome, "-o", prefix + ".cds"],
+                                "--gff", prefix + ".gff",
+                                "--fasta", genome, "-o", prefix + ".cds"],
                                check=True)
                 subprocess.run(["agat_sp_translate_sequences.pl",
-                                "-fasta", prefix + ".cds", "-o", pep_out],
+                                "--fasta", prefix + ".cds", "-o", pep_out],
                                check=True)
-                subprocess.run(["agat_sp_gff_to_bed.pl", "-gff", prefix + ".gff",
+                subprocess.run(["agat_sp_gff_to_bed.pl", "--gff", prefix + ".gff",
                                 "-o", prefix + ".bed"], check=True)
                 print("reduce: %s done" % asm)
             out.write("%s\t%s\t%s\n" % (asm, pep_out, prefix + ".bed"))

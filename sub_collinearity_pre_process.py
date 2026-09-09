@@ -40,19 +40,19 @@ def sub_collinearity_gff_process(gff_file, seq_file):
     gff_base_name = os.path.splitext(os.path.basename(gff_file))[0] + "_AGAT"
 
     # step 1: get longest transcript for each gene
-    cmd_keep_longest = f"agat_sp_keep_longest_isoform.pl -gff {gff_file} \
+    cmd_keep_longest = f"agat_sp_keep_longest_isoform.pl --gff {gff_file} \
         -o {gff_base_name}.gff"
 
     # step 2: extract cds from gff
-    cmd_ex_cds = f"agat_sp_extract_sequences.pl -gff {gff_base_name}.gff \
-        -fasta {seq_file} -o {seq_base_name}.cds"
+    cmd_ex_cds = f"agat_sp_extract_sequences.pl --gff {gff_base_name}.gff \
+        --fasta {seq_file} -o {seq_base_name}.cds"
 
     # step 3: cds to pep
-    cmd_cds2pep = f"agat_sp_translate_sequences.pl -fasta {seq_base_name}.cds \
+    cmd_cds2pep = f"agat_sp_translate_sequences.pl --fasta {seq_base_name}.cds \
         -o {seq_base_name}.pep"
 
     # step 4: gff to bed
-    cmd_gff2bed = f"agat_sp_gff_to_bed.pl -gff {gff_base_name}.gff \
+    cmd_gff2bed = f"agat_sp_gff_to_bed.pl --gff {gff_base_name}.gff \
         -o {gff_base_name}.bed"
     
     subprocess.run(cmd_keep_longest, shell=True, check=True)
