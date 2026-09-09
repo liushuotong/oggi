@@ -77,20 +77,19 @@ def run_reduce(args):
                 import sub_collinearity_pre_process as scp
                 genome_for_agat = scp.wrap_fasta_for_agat(
                     genome, prefix + ".genome.fa")
-                subprocess.run(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
-                                "-o", prefix + ".gff"], check=True)
-                # AGAT v1.7 no longer ships agat_sp_translate_sequences.pl:
                 # extract proteins directly with -p
-                subprocess.run(["agat_sp_extract_sequences.pl",
-                                "--gff", prefix + ".gff",
-                                "--fasta", genome_for_agat,
-                                "-o", pep_out, "-p"], check=True)
+                scp.run_agat(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
+                              "-o", prefix + ".gff"])
+                scp.run_agat(["agat_sp_extract_sequences.pl",
+                              "--gff", prefix + ".gff",
+                              "--fasta", genome_for_agat,
+                              "-o", pep_out, "-p"])
                 if genome_for_agat != genome and \
                         os.path.exists(genome_for_agat):
                     os.remove(genome_for_agat)
-                subprocess.run(["agat_convert_sp_gff2bed.pl",
-                                "--gff", prefix + ".gff",
-                                "-o", prefix + ".bed"], check=True)
+                scp.run_agat(["agat_convert_sp_gff2bed.pl",
+                              "--gff", prefix + ".gff",
+                              "-o", prefix + ".bed"])
                 print("reduce: %s done" % asm)
             out.write("%s\t%s\t%s\n" % (asm, pep_out, prefix + ".bed"))
             done += 1

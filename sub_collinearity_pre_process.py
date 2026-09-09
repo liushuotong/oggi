@@ -1,4 +1,6 @@
+import glob
 import os
+import shutil
 from Bio import SeqIO
 import subprocess
 import gene_family_identification as gfi
@@ -60,6 +62,27 @@ def sub_collinearity_blastp(seq_file, dbsize, evalue = 1e-5, max_target_seqs = 2
     subprocess.run(cmd_blastp, shell=True, check=True)
 
 
+def _cleanup_agat_logs():
+    """Remove AGAT log/tmp directories from the current working directory.
+    AGAT creates them next to wherever the pipeline is run."""
+    for pat in ("agat_log_*", "agat_tmp_*"):
+        for d in glob.glob(os.path.join(os.getcwd(), pat)):
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+
+
+def run_agat(cmd, shell=False):
+    """Run an AGAT command; on success clean up its log/tmp directories.
+    On failure the directories are kept for debugging and the error is
+    re-raised."""
+    try:
+        subprocess.run(cmd, shell=shell, check=True)
+    except subprocess.CalledProcessError:
+        print("AGAT step failed - agat_log_*/agat_tmp_* kept for debugging")
+        raise
+    _cleanup_agat_logs()
+
+
 def sub_collinearity_gff_process(gff_file, seq_file):
     # use AGAT to process gff file and extract gene sequences
     seq_base_name = os.path.splitext(os.path.basename(seq_file))[0] + "_AGAT"
@@ -84,12 +107,12 @@ def sub_collinearity_gff_process(gff_file, seq_file):
     cmd_gff2bed = f"agat_convert_sp_gff2bed.pl --gff {gff_base_name}.gff \
         -o {gff_base_name}.bed"
 
-    subprocess.run(cmd_keep_longest, shell=True, check=True)
-    subprocess.run(cmd_ex_cds, shell=True, check=True)
-    subprocess.run(cmd_cds2pep, shell=True, check=True)
+    run_agat(cmd_keep_longest, shell=True)
+    run_agat(cmd_ex_cds, shell=True)
+    run_agat(cmd_cds2pep, shell=True)
     if fasta_in != seq_file and os.path.exists(fasta_in):
         os.remove(fasta_in)
-    subprocess.run(cmd_gff2bed, shell=True, check=True)
+    run_agat(cmd_gff2bed, shell=True)
 
     return f"{gff_base_name}.gff", f"{seq_base_name}.cds", f"{seq_base_name}.pep", f"{gff_base_name}.bed"
 
