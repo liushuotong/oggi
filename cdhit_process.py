@@ -71,12 +71,22 @@ def process_cdhit_result(cluster_file, gene_to_assembly):
                 name = name[:-3]
             rows.append((cluster, name))
     df = pd.DataFrame(rows, columns=["ogg_cluster", "gene_ID"])
-    missing = [g for g in df["gene_ID"] if g not in gene_to_assembly]
-    if missing:
+
+    # assembly: prefer the id-table; unmapped genes (e.g. window
+    # neighbours not in the identify result) fall back to their ID prefix
+    gene_map = gene_to_assembly or {}
+
+    def assembly_of(g):
+        a = gene_map.get(g)
+        if a:
+            return a
+        return g.split("_", 1)[0]
+
+    missing = [g for g in df["gene_ID"] if g not in gene_map]
+    if gene_map and missing:
         print("WARNING: %d genes not found in gene_to_assembly, e.g. %s"
               % (len(missing), missing[:5]))
-    df["assembly_ID"] = df["gene_ID"].map(
-        lambda g: gene_to_assembly.get(g, ""))
+    df["assembly_ID"] = df["gene_ID"].map(assembly_of)
     return df[["gene_ID", "ogg_cluster", "assembly_ID"]]
 
 def run_cdhit():

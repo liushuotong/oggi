@@ -23,6 +23,18 @@ def _stem(path):
     return os.path.splitext(os.path.basename(path))[0]
 
 
+def _looks_like_fasta(path):
+    """Return True when the first non-empty line of the file starts with '>'."""
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.strip():
+                    return line.lstrip().startswith(">")
+    except OSError:
+        return False
+    return False
+
+
 def load_manifest(manifest_path):
     """Read the reduce manifest: one 'assembly<TAB>pep<TAB>bed' per line."""
     rows = []
@@ -242,9 +254,34 @@ def add_cluster_parser(sp):
 def run_cluster(args):
     if args.method == "cdhit":
         import cdhit_process as chp
-        chp.cdhit(args.input, args.output, c=args.identity, T=args.threads,
+
+        # cd-hit clusters SEQUENCES: -i must be a FASTA.  (-i is the
+        # diamond outfmt6 table only for -M mcl, an easy mix-up.)
+        fasta_in = args.input
+        if not _looks_like_fasta(fasta_in):
+            if args.seq and _looks_like_fasta(args.seq):
+                print("note: -i %s is not a FASTA (cd-hit needs sequences); "
+                      "using --seq %s instead" % (args.input, args.seq))
+                fasta_in = args.seq
+            else:
+                sys.exit("error: -M cdhit requires a FASTA input, e.g. "
+                         "-i <out>.window.fa or the identified family fasta "
+                         "(-i is the blastp table only for -M mcl)")
+        chp.cdhit(fasta_in, args.output, c=args.identity, T=args.threads,
                   M=0, d=0, verbose=True)
-        table = chp.process_cdhit_result(args.output + ".clstr", None)
+
+        gene_to_assembly = {}
+        if args.gene_map:
+            with open(args.gene_map) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    f = line.split("\t")
+                    if len(f) >= 2:
+                        gene_to_assembly[f[0]] = f[1]
+        table = chp.process_cdhit_result(args.output + ".clstr",
+                                         gene_to_assembly or None)
         out_tsv = args.output + ".clstr.tsv"
         table.to_csv(out_tsv, sep="\t", index=False)
         print("cluster(cdhit) done: %d genes in %d clusters -> %s"
