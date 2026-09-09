@@ -6,6 +6,32 @@ import pandas as pd
 
 EXTS = (".pep", ".fa", ".fasta")
 
+FASTA_LINE_LIMIT = 60000      # Bio::DB::Fasta cannot index lines >= 65536
+
+
+def wrap_fasta_for_agat(src, dst, width=60):
+    """If any sequence line exceeds FASTA_LINE_LIMIT chars, write a wrapped
+    copy of the fasta (Bio::DB::Fasta used by AGAT cannot index very long
+    lines) and return dst; otherwise return src unchanged."""
+    long = False
+    with open(src) as fh:
+        for line in fh:
+            if not line.startswith(">"):
+                if len(line.rstrip("\n")) > FASTA_LINE_LIMIT:
+                    long = True
+                    break
+    if not long:
+        return src
+    with open(src) as fin, open(dst, "w") as fout:
+        for line in fin:
+            if line.startswith(">"):
+                fout.write(line)
+            else:
+                seq = line.strip()
+                for i in range(0, len(seq), width):
+                    fout.write(seq[i:i + width] + "\n")
+    return dst
+
 def calculate_average_dbsize(seq_path):
     total = 0
     n = 0
@@ -43,20 +69,24 @@ def sub_collinearity_gff_process(gff_file, seq_file):
     cmd_keep_longest = f"agat_sp_keep_longest_isoform.pl --gff {gff_file} \
         -o {gff_base_name}.gff"
 
-    # step 2: extract cds from gff
+    # step 2: extract cds from gff (wrap the genome fasta first: AGAT's
+    # Bio::DB::Fasta cannot index unwrapped lines >= 65536 chars)
+    fasta_in = wrap_fasta_for_agat(seq_file, f"{seq_base_name}.wrapped.fa")
     cmd_ex_cds = f"agat_sp_extract_sequences.pl --gff {gff_base_name}.gff \
-        --fasta {seq_file} -o {seq_base_name}.cds"
+        --fasta {fasta_in} -o {seq_base_name}.cds --cdna"
 
     # step 3: cds to pep
-    cmd_cds2pep = f"agat_sp_translate_sequences.pl --fasta {seq_base_name}.cds \
-        -o {seq_base_name}.pep"
+    cmd_cds2pep = f"agat_sp_extract_sequences.pl --gff {gff_base_name}.gff \
+        --fasta {fasta_in} -o {seq_base_name}.pep -p"
 
     # step 4: gff to bed
-    cmd_gff2bed = f"agat_sp_gff_to_bed.pl --gff {gff_base_name}.gff \
+    cmd_gff2bed = f"agat_convert_sp_gff2bed.pl --gff {gff_base_name}.gff \
         -o {gff_base_name}.bed"
     
     subprocess.run(cmd_keep_longest, shell=True, check=True)
     subprocess.run(cmd_ex_cds, shell=True, check=True)
+    if fasta_in != seq_file and os.path.exists(fasta_in):
+        os.remove(fasta_in)
     subprocess.run(cmd_cds2pep, shell=True, check=True)
     subprocess.run(cmd_gff2bed, shell=True, check=True)
 

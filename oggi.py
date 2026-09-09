@@ -72,12 +72,20 @@ def run_reduce(args):
             if args.skip_existing and os.path.exists(pep_out):
                 print("skip existing: %s" % pep_out)
             else:
+                # AGAT's Bio::DB::Fasta cannot index unwrapped fasta lines
+                # (>= 65536 chars); wrap a copy when needed
+                import sub_collinearity_pre_process as scp
+                genome_for_agat = scp.wrap_fasta_for_agat(
+                    genome, prefix + ".genome.fa")
                 subprocess.run(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
                                 "-o", prefix + ".gff"], check=True)
                 subprocess.run(["agat_sp_extract_sequences.pl",
                                 "--gff", prefix + ".gff",
-                                "--fasta", genome, "-o", prefix + ".cds"],
-                               check=True)
+                                "--fasta", genome_for_agat,
+                                "-o", prefix + ".cds"], check=True)
+                if genome_for_agat != genome and \
+                        os.path.exists(genome_for_agat):
+                    os.remove(genome_for_agat)
                 subprocess.run(["agat_sp_translate_sequences.pl",
                                 "--fasta", prefix + ".cds", "-o", pep_out],
                                check=True)
