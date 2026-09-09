@@ -69,24 +69,26 @@ def sub_collinearity_gff_process(gff_file, seq_file):
     cmd_keep_longest = f"agat_sp_keep_longest_isoform.pl --gff {gff_file} \
         -o {gff_base_name}.gff"
 
-    # step 2: extract cds from gff (wrap the genome fasta first: AGAT's
+    # step 2: extract cds (cDNA) from gff (wrap the genome fasta first:
+    # AGAT's Bio::DB::Fasta cannot index unwrapped lines >= 65536 chars)
     fasta_in = wrap_fasta_for_agat(seq_file, f"{seq_base_name}.wrapped.fa")
     cmd_ex_cds = f"agat_sp_extract_sequences.pl --gff {gff_base_name}.gff \
         --fasta {fasta_in} -o {seq_base_name}.cds --cdna"
 
-    # step 3: cds to pep
+    # step 3: protein directly with -p (AGAT v1.7 dropped the separate
+    # agat_sp_translate_sequences.pl script)
     cmd_cds2pep = f"agat_sp_extract_sequences.pl --gff {gff_base_name}.gff \
         --fasta {fasta_in} -o {seq_base_name}.pep -p"
 
     # step 4: gff to bed
     cmd_gff2bed = f"agat_convert_sp_gff2bed.pl --gff {gff_base_name}.gff \
         -o {gff_base_name}.bed"
-    
+
     subprocess.run(cmd_keep_longest, shell=True, check=True)
     subprocess.run(cmd_ex_cds, shell=True, check=True)
+    subprocess.run(cmd_cds2pep, shell=True, check=True)
     if fasta_in != seq_file and os.path.exists(fasta_in):
         os.remove(fasta_in)
-    subprocess.run(cmd_cds2pep, shell=True, check=True)
     subprocess.run(cmd_gff2bed, shell=True, check=True)
 
     return f"{gff_base_name}.gff", f"{seq_base_name}.cds", f"{seq_base_name}.pep", f"{gff_base_name}.bed"
