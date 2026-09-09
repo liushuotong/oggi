@@ -70,7 +70,6 @@ def sub_collinearity_gff_process(gff_file, seq_file):
         -o {gff_base_name}.gff"
 
     # step 2: extract cds from gff (wrap the genome fasta first: AGAT's
-    # Bio::DB::Fasta cannot index unwrapped lines >= 65536 chars)
     fasta_in = wrap_fasta_for_agat(seq_file, f"{seq_base_name}.wrapped.fa")
     cmd_ex_cds = f"agat_sp_extract_sequences.pl --gff {gff_base_name}.gff \
         --fasta {fasta_in} -o {seq_base_name}.cds --cdna"
