@@ -53,10 +53,11 @@ def run_pair_diamond(pep1, pep2, out_blast, threads=8, evalue=1e-5,
     if shutil.which("diamond") is None:
         raise FileNotFoundError("diamond not in PATH")
     db = pep1 + ".dmnd"
-    cmd_db = ["diamond", "makedb", "--in", pep1, "-d", db,
+    cmd_db = ["diamond", "makedb", "--in", pep1, "--db", db,
               "--threads", str(threads)]
-    cmd_bp = ["diamond", "blastp", "-d", db, "-q", pep2, "-o", out_blast,
-              "-f", "6", "--evalue", str(evalue),
+    cmd_bp = ["diamond", "blastp", "--db", db, "--query", pep2,
+              "--out", out_blast, "--outfmt", "6",
+              "--evalue", str(evalue),
               "--max-target-seqs", str(max_target_seqs),
               "--threads", str(threads)]
     if verbose:

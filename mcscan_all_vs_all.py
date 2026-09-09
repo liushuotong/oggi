@@ -42,10 +42,10 @@ def mcscanx_BLASTP(seq_1, seq_2, max_seq_hit=10, evalue=1e-5, out_prefix=None):
     if out_prefix is None:
         out_prefix = _pair_prefix(seq_1, seq_2)
     db = seq_1 + ".dmnd"
-    subprocess.run(["diamond", "makedb", "--in", seq_1, "-d", db],
+    subprocess.run(["diamond", "makedb", "--in", seq_1, "--db", db],
                    check=True)
-    subprocess.run(["diamond", "blastp", "-d", db, "-q", seq_2,
-                    "-o", out_prefix + ".blast", "-f", "6",
+    subprocess.run(["diamond", "blastp", "--db", db, "--query", seq_2,
+                    "--out", out_prefix + ".blast", "--outfmt", "6",
                     "--max-target-seqs", str(max_seq_hit),
                     "--evalue", str(evalue)], check=True)
     return out_prefix + ".blast"

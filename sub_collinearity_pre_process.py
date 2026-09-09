@@ -52,12 +52,12 @@ def calculate_average_dbsize(seq_path):
 
 def sub_collinearity_blastp(seq_file, dbsize, evalue = 1e-5, max_target_seqs = 20):
 
-    cmd_mkdb = f"diamond makedb --in {seq_file} -d {seq_file}.dmnd"
+    cmd_mkdb = f"diamond makedb --in {seq_file} --db {seq_file}.dmnd"
     subprocess.run(cmd_mkdb, shell=True, check=True)
 
-    cmd_blastp = f"diamond blastp --query {seq_file} --db {seq_file}.dmnd\
-            -f 6 --evalue {evalue} --max-target-seqs {max_target_seqs} --dbsize {dbsize}\
-            -o {seq_file}.blastp"
+    cmd_blastp = f"diamond blastp --query {seq_file} --db {seq_file}.dmnd \
+            --outfmt 6 --evalue {evalue} --max-target-seqs {max_target_seqs} \
+            --dbsize {dbsize} --out {seq_file}.blastp"
 
     subprocess.run(cmd_blastp, shell=True, check=True)
 
@@ -218,12 +218,12 @@ def seq_BLASTP_for_collinearity(assembly_file_dict, evalue_blastp, gene_family_s
     print("window genes written to %s (total %d)" % (gene_family_seq, len(all_window_ids)))
 
     db = gene_family_seq + ".dmnd"
-    subprocess.run(["diamond", "makedb", "--in", gene_family_seq, "-d", db,
+    subprocess.run(["diamond", "makedb", "--in", gene_family_seq, "--db", db,
                     "--threads", str(cpu)], check=True)
     out_blastp = gene_family_seq + ".blastp"
-    subprocess.run(["diamond", "blastp", "-d", db, "-q", gene_family_seq,
+    subprocess.run(["diamond", "blastp", "--db", db, "--query", gene_family_seq,
                     "--max-target-seqs", "0",
-                    "-o", out_blastp, "-f", "6",
+                    "--out", out_blastp, "--outfmt", "6",
                     "--evalue", str(evalue_blastp),
                     "--dbsize", str(int(dbsize)),
                     "--threads", str(cpu)], check=True)

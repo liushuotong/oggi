@@ -6,18 +6,26 @@ import pandas as pd
 def identification_caculation(hmm_dict, ref_seq_dict, evalue_hmm, evalue_blastp, seq_file, output_file, cpu):
     id = {}
     for i in range(len(hmm_dict)):
-        cmd_hmmsearch = f"hmmsearch --cpu {cpu} --tblout \"{output_file}_{hmm_dict[i][0]}.tblout\" \
-            --noali -E {evalue_hmm} \"{hmm_dict[i][1]}\" \"{seq_file}\""
-        subprocess.run(cmd_hmmsearch, shell=True, check=True)
-        id = hmm_results_process(id, f"{output_file}_{hmm_dict[i][0]}.tblout")
-    cmd_mkdb = f"diamond makedb --in \"{seq_file}\" -d \"{seq_file}.dmnd\""
-    subprocess.run(cmd_mkdb, shell=True, check=True)
+        tbl = f"{output_file}_{hmm_dict[i][0]}.tblout"
+        subprocess.run(["hmmsearch", "--cpu", str(cpu), "--tblout", tbl,
+                        "--noali", "-E", str(evalue_hmm),
+                        hmm_dict[i][1], seq_file], check=True)
+        id = hmm_results_process(id, tbl)
+    subprocess.run(["diamond", "makedb", "--in", seq_file,
+                    "--db", seq_file + ".dmnd",
+                    "--threads", str(cpu)], check=True)
     for i in range(len(ref_seq_dict)):
-        cmd_blastp = f"diamond blastp -db \"{seq_file}.dmnd\" \
-            -query \"{ref_seq_dict[i][1]}\" -out \"{output_file}_{ref_seq_dict[i][0]}.blastp\" \
-            -evalue {evalue_blastp} -num_threads {cpu} --max-target-seqs 0"
-        subprocess.run(cmd_blastp, shell=True, check=True)
-        id = blastp_results_process(id, f"{output_file}_{ref_seq_dict[i][0]}.blastp")
+        out = f"{output_file}_{ref_seq_dict[i][0]}.blastp"
+        # note: diamond option is -d/--db, --query, --out, --evalue,
+        # --threads (single-dash -db/-evalue etc. are not accepted)
+        subprocess.run(["diamond", "blastp",
+                        "--db", seq_file + ".dmnd",
+                        "--query", ref_seq_dict[i][1],
+                        "--out", out,
+                        "--evalue", str(evalue_blastp),
+                        "--threads", str(cpu),
+                        "--max-target-seqs", "0"], check=True)
+        id = blastp_results_process(id, out)
     return id
 
 def hmm_results_process(id, hmm_path):
