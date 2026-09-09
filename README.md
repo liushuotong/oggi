@@ -255,9 +255,9 @@ any of these tools bundled, comply with their respective licenses.
 
 Please cite OGGI as:
 
-> Liu S., Zhang W., Yu P. (2026). OGGI: gene-family identification and
-> orthology-aware clustering for plant pangenomes. (Manuscript in preparation;
-> DOI will be added on publication.)
+> Liu S., Zhang W., Yu P. (2026). Methodological pitfalls in plant pangenome
+> gene family identification may lead to biased evolutionary inferences.
+> (https://doi.org/10.64898/2026.05.15.725319)
 
 ## Contact
 
