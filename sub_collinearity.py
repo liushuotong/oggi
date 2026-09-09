@@ -179,7 +179,7 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                                    grading=(50, 40, 25), keep_hits=10,
                                    pvalue_accept=0.2, coverage_ratio=0.8,
                                    max_pairs=None, pairs_out=None,
-                                   verbose=True):
+                                   blocks_out=None, verbose=True):
     """Batch: decide whether known gene pairs lie inside collinear blocks
     (window-level sub-collinearity).
 
@@ -196,6 +196,13 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         pairs_out: optional path; when given, all anchor gene pairs of
             significant collinear blocks are written there as
             (gene_1<TAB>gene_2, deduplicated) for collinearity_matrix.
+            The file is always created (empty when nothing found).
+        blocks_out: optional path; when given, every significant collinear
+            block is written in wgdi/MCScanX style ('# Alignment N: ...'
+            headers followed by geneA<TAB>locA<TAB>geneB<TAB>locB rows).
+            Blocks are deduplicated by their anchor-gene set so shifted
+            windows do not repeat them.  This raw file is meant for
+            inspection and can also be read by parse_collinearity_pairs().
     Returns:
         DataFrame with one row per known gene pair:
         assembly_1, gene_1, assembly_2, gene_2, direct_hit,
@@ -203,10 +210,59 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         best_block_n, n_blocks_total
     """
     asms = [r["assembly"] for r in manifest_rows]
-    asm_set = set(asms)
     bed_of = {r["assembly"]: r["bed"] for r in manifest_rows}
     members_of = {a: sorted(g for g, x in gene_to_assembly.items() if x == a)
                   for a in asms}
+
+    # ---- assembly name of a window gene --------------------------------
+    # Window genes come from AGAT pep files whose IDs use the gene-ID
+    # prefix of the annotation (e.g. "col_AT5G38860.1"), which is NOT the
+    # manifest assembly name (e.g. "01.col").  Learn the mapping from the
+    # identify id-table: gene ID prefix -> manifest assembly name.
+    prefix2asm = {}
+    for g, a in gene_to_assembly.items():
+        p = g.split("_", 1)[0]
+        if p in prefix2asm and prefix2asm[p] != a:
+            raise ValueError(
+                "gene-ID prefix %r is shared by assemblies %r and %r; "
+                "cannot attribute window genes" % (p, prefix2asm[p], a))
+        prefix2asm[p] = a
+
+    def asm_of(gene_id):
+        return prefix2asm.get(gene_id.split("_", 1)[0])
+
+    # ---- read blast once; attribute rows to assembly pairs via the
+    # ---- gene-ID prefix learned from the id-table, and index hits by
+    # ---- gene so per-pair window anchors are cheap to collect
+    blast = _read_blast(blast_file)
+    blast = blast[blast["evalue"] <= evalue]
+    from collections import defaultdict
+    rows_by_pair = defaultdict(list)      # (asm_a, asm_b) -> [(gene_a, gene_b, bitscore)]
+    idx_by_pair = defaultdict(dict)       # (asm_a, asm_b) -> {gene_a: [(gene_b, bitscore)]}
+    for r in blast.itertuples(index=False):
+        qa, sa = asm_of(str(r.qseqid)), asm_of(str(r.sseqid))
+        if qa is None or sa is None:
+            continue
+        if qa == sa:
+            continue
+        if qa < sa:
+            rows_by_pair[(qa, sa)].append((r.qseqid, r.sseqid, float(r.bitscore)))
+            idx_by_pair[(qa, sa)].setdefault(r.qseqid, []).append((r.sseqid, float(r.bitscore)))
+        else:
+            rows_by_pair[(sa, qa)].append((r.sseqid, r.qseqid, float(r.bitscore)))
+            idx_by_pair[(sa, qa)].setdefault(r.sseqid, []).append((r.qseqid, float(r.bitscore)))
+
+    # ---- per-assembly bed cache: window_of loads each bed once
+    bed_cache = {}
+
+    def _bed(asm):
+        if asm not in bed_cache:
+            bed_path = bed_of.get(asm)
+            if not bed_path or not os.path.exists(bed_path):
+                raise FileNotFoundError("bed missing for %s: %s"
+                                        % (asm, bed_path))
+            bed_cache[asm] = load_bed(bed_path)
+        return bed_cache[asm]
 
     # ---- window cache: (asm, gene) -> (win_df, {gene: loc}) ----
     win_cache = {}
@@ -215,31 +271,16 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         key = (asm, gene)
         if key in win_cache:
             return win_cache[key]
-        bed_path = bed_of.get(asm)
-        if not bed_path or not os.path.exists(bed_path):
-            raise FileNotFoundError("bed missing for %s: %s" % (asm, bed_path))
-        win, _ = make_window(load_bed(bed_path), gene, up=up, down=down)
+        win, _ = make_window(_bed(asm), gene, up=up, down=down)
         loc_of = dict(zip(win["gene_id"], win["loc"]))
         win_cache[key] = (win, loc_of)
         return win_cache[key]
 
-    # ---- read blast once, group by assembly pair (query side = smaller
-    # ---- assembly name)
-    blast = _read_blast(blast_file)
-    blast = blast[blast["evalue"] <= evalue]
-    from collections import defaultdict
-    rows_by_pair = defaultdict(list)
-    for r in blast.itertuples(index=False):
-        qa = str(r.qseqid).split("_", 1)[0]
-        sa = str(r.sseqid).split("_", 1)[0]
-        if qa not in asm_set or sa not in asm_set:
-            continue
-        if qa == sa:
-            continue
-        if qa < sa:
-            rows_by_pair[(qa, sa)].append((r.qseqid, r.sseqid, r.bitscore))
-        else:
-            rows_by_pair[(sa, qa)].append((r.sseqid, r.qseqid, r.bitscore))
+    records = []
+    processed = 0
+    harvested = set()          # anchor gene pairs of significant blocks
+    raw_blocks_seen = {}       # (asm_a, asm_b, frozenset pairs) -> block info
+    block_counter = 0
 
     def _dp_options():
         return [("gap_penalty", gap_penalty), ("over_gap", over_gap),
@@ -247,9 +288,6 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                 ("coverage_ratio", coverage_ratio),
                 ("grading", "%d,%d,%d" % tuple(grading))]
 
-    records = []
-    processed = 0
-    harvested = set()      # anchor gene pairs of all significant blocks
     pair_names = sorted({k[0] for k in rows_by_pair} |
                         {k[1] for k in rows_by_pair})
     for a in pair_names:
@@ -261,10 +299,13 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
             ma, mb = members_of.get(a, []), members_of.get(b, [])
             if not ma or not mb:
                 continue
-            rows_ab = rows_by_pair[(a, b)]
+            idx_ab = idx_by_pair[(a, b)]
+            mb_set = set(mb)
             hit_canon = set()
-            for q, s, _sc in rows_ab:
-                hit_canon.add((q, s) if q < s else (s, q))
+            for ga in ma:
+                for s, _sc in idx_ab.get(ga, ()):
+                    if s in mb_set:
+                        hit_canon.add((ga, s) if ga < s else (s, ga))
             pair_done = 0
             for ga in ma:
                 for gb in mb:
@@ -283,20 +324,15 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                     if ga not in loc1 or gb not in loc2:
                         continue
 
-                    # anchors inside the windows: keep the highest-bitscore
-                    # row per window gene pair (loc1, loc2)
+                    # anchors between the two windows: walk the per-gene hit
+                    # index (all rows are stored gene-of-a -> gene-of-b)
                     best = {}
-                    for q, s, sc in rows_ab:
-                        if q in loc1 and s in loc2:
-                            k = (loc1[q], loc2[s])
-                            orient = (q, s)
-                        elif s in loc1 and q in loc2:
-                            k = (loc1[s], loc2[q])
-                            orient = (s, q)
-                        else:
-                            continue
-                        if k not in best or sc > best[k][0]:
-                            best[k] = (sc,) + orient
+                    for q in loc1:
+                        for s, sc in idx_ab.get(q, ()):
+                            if s in loc2:
+                                k = (loc1[q], loc2[s])
+                                if k not in best or sc > best[k][0]:
+                                    best[k] = (sc, q, s)
                     # grading (wgdi style): per window-1-side gene by
                     # bitscore, rank 1 = 50, ranks 2-5 = 40, ranks 6-10 = 25,
                     # the rest dropped
@@ -334,12 +370,40 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                     best_pv, best_sc, best_n = None, None, 0
                     n_ok = 0
                     for blk, pv, sc in raw_blocks:
+                        if len(blk) < over_gap:
+                            continue
+                        n_ok += 1
                         pairs_blk = set(zip(blk["loc1"], blk["loc2"]))
-                        if len(blk) >= over_gap:
-                            n_ok += 1
-                        # collect anchor pairs of significant blocks (for the
-                        # collinearity matrix)
-                        if len(blk) >= over_gap and pv <= pvalue_accept:
+                        # raw output: record only significant blocks that
+                        # contain the tested known pair (the per-window DP
+                        # also finds shifted/nested blocks that do not carry
+                        # the centre pair; those anchors are still harvested
+                        # below but would flood the raw file)
+                        if pv <= pvalue_accept and anchor_pair in pairs_blk:
+                            genes_blk = frozenset(
+                                (rev1.get(l1), rev2.get(l2))
+                                for l1, l2 in pairs_blk
+                                if rev1.get(l1) and rev2.get(l2)
+                                and rev1[l1] != rev2[l2])
+                            if genes_blk:
+                                key = (a, b, genes_blk)
+                                info = raw_blocks_seen.get(key)
+                                if info is None or pv < info["pvalue"]:
+                                    rows_blk = sorted(
+                                        (rev1[l1], int(l1), rev2[l2], int(l2))
+                                        for l1, l2 in pairs_blk
+                                        if rev1.get(l1) and rev2.get(l2))
+                                    bs = blk.sort_values("loc1")
+                                    raw_blocks_seen[key] = {
+                                        "score": float(sc), "pvalue": float(pv),
+                                        "rows": rows_blk,
+                                        "orientation": ("plus" if
+                                            bs["loc2"].iloc[-1] >
+                                            bs["loc2"].iloc[0] else "minus"),
+                                    }
+                        # harvest anchors of every significant block (the
+                        # collinearity matrix input)
+                        if pv <= pvalue_accept:
                             for l1, l2 in pairs_blk:
                                 gx = rev1.get(l1)
                                 gy = rev2.get(l2)
@@ -371,7 +435,29 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
     cols = ["assembly_1", "gene_1", "assembly_2", "gene_2", "direct_hit",
             "in_collinear_block", "best_block_score", "best_block_pvalue",
             "best_block_n", "n_blocks_total"]
-    if pairs_out and harvested:
+
+    # ---- raw collinearity block file (wgdi/MCScanX-style: '# Alignment'
+    # ---- headers followed by 'geneA locA geneB locB' rows) ----
+    if blocks_out:
+        n_raw = len(raw_blocks_seen)
+        with open(blocks_out, "w") as fh:
+            fh.write("# raw collinear blocks (significant, pvalue<=%g)\n"
+                     % pvalue_accept)
+            for (a, b, _gs), info in sorted(
+                    raw_blocks_seen.items(),
+                    key=lambda kv: (kv[0][0], kv[0][1], kv[1]["pvalue"])):
+                block_counter += 1
+                fh.write("# Alignment %d: score=%g pvalue=%g N=%d %s&%s %s\n"
+                         % (block_counter, info["score"], info["pvalue"],
+                            len(info["rows"]), a, b,
+                            info["orientation"]))
+                for g1, l1, g2, l2 in info["rows"]:
+                    fh.write("%s\t%d\t%s\t%d\n" % (g1, l1, g2, l2))
+        if verbose:
+            print("raw collinear blocks written: %d -> %s"
+                  % (n_raw, blocks_out))
+
+    if pairs_out:
         with open(pairs_out, "w") as fh:
             for gx, gy in sorted(harvested):
                 fh.write("%s\t%s\n" % (gx, gy))

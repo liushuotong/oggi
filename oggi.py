@@ -195,19 +195,22 @@ def run_subcoli(args):
 
     # step 2: batch-test whether known gene pairs (cross-assembly family
     #         members with a direct blast hit) lie inside collinear blocks;
-    #         also export all significant collinear anchor pairs
+    #         also export all significant collinear anchor pairs and keep a
+    #         raw wgdi/MCScanX-style block file for inspection
     pairs_tsv = args.output + ".collinear_pairs.tsv"
+    blocks_tsv = args.output + ".collinearity.raw.txt"
     pairs = sci.batch_member_pair_collinearity(
         rows, gene_to_assembly, blastp_out,
         up=args.up, down=args.down, evalue=args.evalue,
         pvalue_accept=args.pvalue, max_pairs=args.max_pairs,
-        pairs_out=pairs_tsv)
+        pairs_out=pairs_tsv, blocks_out=blocks_tsv)
     out_tsv = args.output + ".known_pairs.collinearity.tsv"
     pairs.to_csv(out_tsv, sep="\t", index=False)
     print("subcoli done: %d known pairs tested, %d in collinear blocks -> %s"
           % (len(pairs),
              int(pairs["in_collinear_block"].sum()) if len(pairs) else 0,
              out_tsv))
+    print("raw collinear blocks (inspect me): %s" % blocks_tsv)
     print("collinear pairs (for cluster): %s" % pairs_tsv)
 
 def add_cluster_parser(sp):

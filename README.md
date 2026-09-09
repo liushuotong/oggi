@@ -129,7 +129,10 @@ Outputs:
 | `<out>.gene_to_assembly.tsv` | `gene_ID<TAB>assembly_ID` |
 
 Gene IDs must encode the assembly as the prefix before the first `_`
-(e.g. `534M_025.972`).
+(e.g. `534M_025.972`).  The manifest assembly name (first column) does not
+need to equal that prefix (`subcoli` learns the prefix -> assembly mapping
+from the `identify` id-table, so e.g. a manifest row `01.col` pointing at
+`col_AT5G38860.1`-style genes works).
 
 ### `oggi subcoli`  - ?sub-collinearity
 
@@ -148,6 +151,7 @@ Outputs:
 |---|---|
 | `<out>.window.fa` / `.blastp` | window sequences and all-vs-all hits |
 | `<out>.known_pairs.collinearity.tsv` | one row per tested pair: `assembly_1, gene_1, assembly_2, gene_2, direct_hit, in_collinear_block, best_block_score, best_block_pvalue, best_block_n, n_blocks_total` |
+| `<out>.collinearity.raw.txt` | raw significant collinear blocks in wgdi/MCScanX style (`# Alignment N: score=.. pvalue=.. N=.. asm_a&asm_b plus/minus` headers + `geneA locA geneB locB` rows); one block per tested pair that lies in a block, deduplicated by anchor-gene set. Also readable by `parse_collinearity_pairs()` (e.g. as the cluster `--collinear-pairs` block file). |
 | `<out>.collinear_pairs.tsv` | deduplicated anchor gene pairs of all significant blocks (the real collinearity evidence for clustering) |
 
 ### `oggi cluster`  - ?clustering
