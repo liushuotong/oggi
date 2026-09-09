@@ -188,6 +188,49 @@ python oggi.py wgdi -h           # wgdi_all_vs_all.py (bed -> wgdi -icl)
 python oggi.py mcscanx -h        # MCScanX all-vs-all
 ```
 
+### Full OrthoFinder trial on six Arabidopsis proteomes
+
+The wrapper defaults to a **full** analysis (MSA/FAMSA/FastTree, DIAMOND,
+MCL inflation 1.2), followed by parsing `N0.tsv`. It does not pass `-og`:
+that stopping option is absent from the supplied OrthoFinder help and would
+not provide the full phylogenetic results needed here.
+
+```bash
+cd ~/oggi_v1/ath_genome_and_annotation/orthofinder
+python ~/oggi_v1/oggi.py orthofinder \
+    -i "$PWD" -o ../orthofinder_ath6_trial \
+    -t 16 -a 8 -I 1.2 -M msa -S diamond -A famsa -T fasttree \
+    --level N0
+```
+
+`-o` must name a **new, nonexistent directory**; do not create it first.
+If omitted, OGGI chooses a unique sibling output directory. The input folder
+is scanned for proteome FASTA files, so these six `.pep` files can be used
+directly, one file per assembly. The wrapper prints the resolved result
+directory and writes `Phylogenetic_Hierarchical_Orthogroups/N0.long.tsv`
+there, with columns `gene_ID`, `ogg_cluster`, `assembly_ID`.
+Assembly labels follow the input filenames (e.g. `01.col_AGAT`); gene IDs
+are preserved as they appear in OrthoFinder's output. This is a whole-proteome
+analysis, not a restriction to one TF family; HOG membership is not an allele call.
+
+To run OrthoFinder directly with the same inference settings:
+
+```bash
+orthofinder -f "$PWD" -o ../orthofinder_ath6_trial \
+    -t 16 -a 8 -I 1.2 -M msa -S diamond -A famsa -T fasttree
+python ~/oggi_v1/oggi.py orthofinder \
+    --results-dir ../orthofinder_ath6_trial --level N0
+```
+
+Choose either the wrapper run or the direct run; do not run both against the
+same output directory. `--results-dir` only converts an existing result and
+does not launch OrthoFinder. If the supplied folder contains multiple runs,
+specify the exact `Results_*` directory. `--level N1` (or another existing
+node) parses that HOG table; `--level OG` reads the legacy table. Select the
+node from the labelled species tree when outgroups are included. The default
+trial does not add a species tree or enable `-y`; these are available as
+`-s/--species-tree` and `-y/--split-hogs` when explicitly needed.
+
 All wrappers convert their results into shared long tables where possible:
 
 | Method | Key output |
