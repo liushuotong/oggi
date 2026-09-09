@@ -1,7 +1,6 @@
 import os
 from Bio import SeqIO
 import subprocess
-import pandas as pd
 
 
 def identification_caculation(hmm_dict, ref_seq_dict, evalue_hmm,
@@ -50,18 +49,36 @@ def identification_caculation(hmm_dict, ref_seq_dict, evalue_hmm,
 
 
 def hmm_results_process(hmm_path):
-    # hmmsearch --tblout: target sequence ID is column 1 (target name)
-    hmm_files = pd.read_csv(hmm_path, sep="\t", comment="#", header=None,
-                            usecols=[0])
-    return set(str(x) for x in hmm_files[0] if pd.notna(x))
+    """Parse an hmmsearch --tblout file.
+
+    NOTE: tblout columns are aligned with SPACES (not tab-separated), so
+    the target sequence ID is the first whitespace-delimited token of
+    every data row; '#' lines and blank lines are skipped.
+    """
+    targets = set()
+    with open(hmm_path, "r") as fh:
+        for line in fh:
+            if not line.strip() or line.startswith("#"):
+                continue
+            targets.add(line.split()[0])
+    return targets
 
 
 def blastp_results_process(blastp_path):
-    # diamond blastp (query=ref, db=assembly): the assembly gene is in
-    # column 2 (sseqid); column 1 (qseqid) is the reference sequence ID
-    blastp_files = pd.read_csv(blastp_path, sep="\t", header=None,
-                               usecols=[1])
-    return set(str(x) for x in blastp_files[1] if pd.notna(x))
+    """Parse a diamond blastp outfmt6 file (query=ref, db=assembly).
+
+    The assembly gene is the second whitespace-delimited field (sseqid);
+    the first field (qseqid) is the reference sequence ID.
+    """
+    subjects = set()
+    with open(blastp_path, "r") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            fields = line.split()
+            if len(fields) > 1:
+                subjects.add(fields[1])
+    return subjects
 
 
 def identification_extract_seq(id, seq_file, output_file):
