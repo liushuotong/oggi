@@ -49,25 +49,19 @@ def identification_caculation(hmm_dict, ref_seq_dict, evalue_hmm,
     return hits if hits is not None else set()
 
 
-def hmm_results_process(id, hmm_path):
+def hmm_results_process(hmm_path):
     # hmmsearch --tblout: target sequence ID is column 1 (target name)
     hmm_files = pd.read_csv(hmm_path, sep="\t", comment="#", header=None,
                             usecols=[0])
-    hits = set(str(x) for x in hmm_files[0] if pd.notna(x))
-    if id != {}:
-        return id & hits
-    return hits
+    return set(str(x) for x in hmm_files[0] if pd.notna(x))
 
 
-def blastp_results_process(id, blastp_path):
+def blastp_results_process(blastp_path):
     # diamond blastp (query=ref, db=assembly): the assembly gene is in
     # column 2 (sseqid); column 1 (qseqid) is the reference sequence ID
     blastp_files = pd.read_csv(blastp_path, sep="\t", header=None,
                                usecols=[1])
-    hits = set(str(x) for x in blastp_files[1] if pd.notna(x))
-    if id != {}:
-        return id & hits
-    return hits
+    return set(str(x) for x in blastp_files[1] if pd.notna(x))
 
 
 def identification_extract_seq(id, seq_file, output_file):
