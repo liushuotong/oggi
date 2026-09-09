@@ -36,8 +36,8 @@ def sub_collinearity_blastp(seq_file, dbsize, evalue = 1e-5, max_target_seqs = 2
 
 def sub_collinearity_gff_process(gff_file, seq_file):
     # use AGAT to process gff file and extract gene sequences
-    seq_base_name = {os.path.splitext(os.path.basename(seq_file))[0]} + "_AGAT"
-    gff_base_name = {os.path.splitext(os.path.basename(gff_file))[0]} + "_AGAT"
+    seq_base_name = os.path.splitext(os.path.basename(seq_file))[0] + "_AGAT"
+    gff_base_name = os.path.splitext(os.path.basename(gff_file))[0] + "_AGAT"
 
     # step 1: get longest transcript for each gene
     cmd_keep_longest = f"agat_sp_keep_longest_isoform.pl -gff {gff_file} \
@@ -79,16 +79,25 @@ def get_gene_family_id(identification_result, assembly_file_dict, hmm_dict, ref_
                        evalue_hmm, evalue_blastp, gene_family_seq, cpu):
     gene_to_assembly, sorted_id, seq_path = gfi.main_identification(assembly_file_dict, hmm_dict, ref_seq_dict,
                                                         evalue_hmm, evalue_blastp, gene_family_seq, cpu)
-    pd.to_csv(gene_to_assembly, filename = f"{identification_result}_gene_id.tsv", sep = "\t", header = None, index = None)
-    # save copy number in each assembly
-    copy_number = {}
-    for assembly in assembly_file_dict:
-        copy_number[assembly[0]] = len(assembly[1].split(";"))
-    pd.to_csv(copy_number, filename = f"{identification_result}_copy_number.tsv", sep = "\t", header = None, index = None)
+    # gene -> assembly table
+    gene_df = pd.DataFrame(sorted(gene_to_assembly.items()),
+                           columns=["gene_ID", "assembly_ID"])
+    gene_df.to_csv(f"{identification_result}_gene_id.tsv",
+                   sep="\t", index=False, header=False)
+    # copy number per assembly (0 for assemblies without any hit)
+    asm_names = [assembly_file_dict[i][0] for i in range(len(assembly_file_dict))]
+    copy_number = {asm: 0 for asm in asm_names}
+    for a in gene_to_assembly.values():
+        copy_number[a] = copy_number.get(a, 0) + 1
+    num_df = pd.DataFrame(sorted(copy_number.items()),
+                          columns=["assembly_ID", "copy_number"])
+    num_df.to_csv(f"{identification_result}_copy_number.tsv",
+                  sep="\t", index=False, header=False)
     return gene_to_assembly, sorted_id
 
 def seq_BLASTP_for_collinearity(assembly_file_dict, evalue_blastp, gene_family_seq,
-                                UP, DOWN, identification_result, cpu):
+                                UP, DOWN, identification_result, cpu,
+                                bed_of=None):
     fasta_list = [assembly_file_dict[i][1] for i in range(len(assembly_file_dict))]
     dbsize = calculate_average_dbsize(fasta_list)
     print("dbsize =", int(dbsize))
@@ -103,8 +112,13 @@ def seq_BLASTP_for_collinearity(assembly_file_dict, evalue_blastp, gene_family_s
     window_by_file = {}
     all_window_ids = set()
     for fasta, member_genes in genes_by_file.items():
-        bed_path = os.path.join(os.path.dirname(fasta),
-                                os.path.splitext(os.path.basename(fasta))[0] + "_AGAT.bed")
+        if bed_of is not None and fasta in bed_of:
+            bed_path = bed_of[fasta]
+        else:
+            # 兼容旧调用: 按 pep 文件旁的同名 bed 推导
+            bed_path = os.path.join(os.path.dirname(fasta),
+                                    os.path.splitext(os.path.basename(fasta))[0]
+                                    + ".bed")
         if not os.path.isfile(bed_path):
             raise FileNotFoundError(f"bed not found: {bed_path}")
 

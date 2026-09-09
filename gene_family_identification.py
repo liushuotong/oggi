@@ -60,8 +60,9 @@ def main_identification(assembly_file_dict, hmm_dict, ref_seq_dict, evalue_hmm, 
         sorted_id |= ids
     with open(gene_family_seq, "w") as out:
         for i in range(len(assembly_file_dict)):
-            part = f"{gene_family_seq}.{assembly_name}.fasta"
+            part = "%s.%s.fasta" % (gene_family_seq, assembly_file_dict[i][0])
             if os.path.exists(part):
                 with open(part) as f:
                     out.write(f.read())
+                os.remove(part)
     return gene_to_assembly, sorted_id, gene_family_seq

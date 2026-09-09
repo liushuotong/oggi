@@ -125,24 +125,33 @@ def run_identify(args):
 def add_subcoli_parser(sp):
     p = sp.add_parser(
         "subcoli",
-        help="sub-collinearity: ±UP/DOWN windows around family members -> all-vs-all")
+        help="sub-collinearity: ±UP/DOWN windows around family members -> "
+             "all-vs-all -> collinear-block check for known gene pairs")
     p.add_argument("--manifest", required=True,
                    help="assembly_manifest.tsv from reduce")
     p.add_argument("--id-table", required=True,
                    help="gene_to_assembly.tsv from identify")
     p.add_argument("-o", "--output", required=True, help="output prefix")
+    p.add_argument("--blast", default=None,
+                   help="precomputed window blastp (skip the diamond step)")
     p.add_argument("-U", "--up", type=int, default=10, help="upstream genes")
     p.add_argument("-D", "--down", type=int, default=10, help="downstream genes")
     p.add_argument("-e", "--evalue", type=float, default=1e-5)
+    p.add_argument("--pvalue", type=float, default=0.2,
+                   help="max block pvalue to call a pair collinear")
+    p.add_argument("--max-pairs", type=int, default=None,
+                   help="limit number of tested known pairs (debug)")
     p.add_argument("-t", "--threads", type=int, default=8)
     p.set_defaults(func=run_subcoli)
 
 
 def run_subcoli(args):
+    import sub_collinearity as sci
     import sub_collinearity_pre_process as scp
 
     rows = load_manifest(args.manifest)
     pep_of = {r["assembly"]: r["pep"] for r in rows}
+    bed_of = {r["assembly"]: r["bed"] for r in rows}
     gene_to_assembly = {}
     with open(args.id_table) as fh:
         for line in fh:
@@ -154,32 +163,53 @@ def run_subcoli(args):
 
     ids = sorted(gene_to_assembly)
     assembly_file_dict = [[r["assembly"], r["pep"]] for r in rows]
-
     identification_result = {0: ids,
                              1: [pep_of[gene_to_assembly[g]] for g in ids]}
 
-    blastp_out, window_ids = scp.seq_BLASTP_for_collinearity(
-        assembly_file_dict=assembly_file_dict,
-        evalue_blastp=args.evalue,
-        gene_family_seq=args.output + ".window.fa",
-        UP=args.up, DOWN=args.down,
-        identification_result=identification_result,
-        cpu=args.threads)
-    print("subcoli: blastp written to %s (%d window genes)"
-          % (blastp_out, len(window_ids)))
-    print("next: collinearity-block detection on %s "
-          "(sub_collinearity.pairwise_comparison / wgdi -icl)" % blastp_out)
+    # step 1: 窗口提取 + all-vs-all(可用 --blast 跳过 diamond)
+    if args.blast:
+        blastp_out = args.blast
+        print("use precomputed blastp: %s" % blastp_out)
+    else:
+        blastp_out, window_ids = scp.seq_BLASTP_for_collinearity(
+            assembly_file_dict=assembly_file_dict,
+            evalue_blastp=args.evalue,
+            gene_family_seq=args.output + ".window.fa",
+            UP=args.up, DOWN=args.down,
+            identification_result=identification_result,
+            cpu=args.threads,
+            bed_of={v: bed_of[k] for k, v in pep_of.items()})
+        print("window blastp: %s (%d window genes)"
+              % (blastp_out, len(window_ids)))
+
+    # step 2: 批量判定已知基因对(跨组装家族成员且 blast 直接命中)
+    #         是否落在共线块内
+    pairs = sci.batch_member_pair_collinearity(
+        rows, gene_to_assembly, blastp_out,
+        up=args.up, down=args.down, evalue=args.evalue,
+        pvalue_accept=args.pvalue, max_pairs=args.max_pairs)
+    out_tsv = args.output + ".known_pairs.collinearity.tsv"
+    pairs.to_csv(out_tsv, sep="\t", index=False)
+    print("subcoli done: %d known pairs tested, %d in collinear blocks -> %s"
+          % (len(pairs),
+             int(pairs["in_collinear_block"].sum()) if len(pairs) else 0,
+             out_tsv))
 
 def add_cluster_parser(sp):
     p = sp.add_parser("cluster", help="cluster gene families (MCL or cd-hit)")
     p.add_argument("-i", "--input", required=True,
-                   help="MCL: abc edge file; cd-hit: fasta file")
+                   help="cd-hit: fasta; mcl 全流程: 窗口 blastp(outfmt6); "
+                        "mcl 朴素: abc 边文件")
     p.add_argument("-o", "--output", required=True, help="output prefix")
     p.add_argument("-M", "--method", choices=["mcl", "cdhit"], default="mcl")
     p.add_argument("-I", "--inflation", type=float, default=1.5,
                    help="MCL inflation")
     p.add_argument("-c", "--identity", type=float, default=0.8,
                    help="identity threshold (cd-hit)")
+    p.add_argument("--seq", default=None,
+                   help="mcl 全流程: 窗口基因 fasta(确定 sorted_id)")
+    p.add_argument("--gene-map", default=None,
+                   help="mcl 全流程: gene_ID<TAB>assembly_ID tsv(identify 产物)")
     p.add_argument("--tree", default=None,
                    help="optional species tree .nwk for assembly penalty (mcl)")
     p.add_argument("-t", "--threads", type=int, default=8)
@@ -198,9 +228,42 @@ def run_cluster(args):
               % (len(table), table["ogg_cluster"].nunique(), out_tsv))
         return
 
-    if args.tree:
-        print("note: --tree assembly penalty will be applied once "
-              "MCL_matrix.create_mcl_matrix is wired with this input")
+    # ---------------- MCL ----------------
+    if args.seq and args.gene_map:
+        # 全流程: 4 矩阵乘积(alignment*similarity*collinearity*assembly树)
+        from Bio import SeqIO
+        import MCL_matrix as mm
+
+        sorted_id = [rec.id for rec in SeqIO.parse(args.seq, "fasta")]
+        if not sorted_id:
+            raise ValueError("no sequences in --seq %s" % args.seq)
+        gene_to_assembly = {}
+        with open(args.gene_map) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                f = line.split("\t")
+                if len(f) >= 2:
+                    gene_to_assembly[f[0]] = f[1]
+        # 未映射的基因(如窗口邻居)按 ID 前缀归属
+        for g in sorted_id:
+            if g not in gene_to_assembly:
+                gene_to_assembly[g] = g.split("_", 1)[0]
+
+        matrix = mm.create_mcl_matrix(args.seq, args.input, sorted_id,
+                                      gene_to_assembly, tree_file=args.tree)
+        clusters = mm.run_mcl(matrix, inflation=args.inflation)
+        with open(args.output, "w") as out:
+            for cl in clusters:
+                out.write("\t".join(cl) + "\n")
+        print("cluster(mcl, 4-matrix) done: %d clusters -> %s"
+              % (len(clusters), args.output))
+        return
+
+    # 朴素 ABC 直跑(缺少 --seq/--gene-map 时的回退)
+    print("note: 4-matrix pipeline needs --seq + --gene-map; "
+          "fall back to plain mcl --abc")
     subprocess.run(["mcl", args.input, "--abc", "-I", str(args.inflation),
                     "-te", str(args.threads), "-o", args.output], check=True)
     print("cluster(mcl) done: %s" % args.output)
