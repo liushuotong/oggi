@@ -1,28 +1,13 @@
-# -*- coding: utf-8 -*-
-"""
-mcscan_all_vs_all.py — MCScanX 两两全基因组共线性集成
-=====================================================================
-流程(每对组装 a < b, 按主名一一配对 gff/基因组):
-  1) AGAT 预处理一次/组装(sub_collinearity_pre_process.sub_collinearity_gff_process
-     -> *_AGAT.gff / *.cds / *.pep / *.bed, 输出到当前目录);
-  2) 两个 AGAT bed -> MCScanX 输入 <a>_<b>.gff (chr,gene,start,end);
-  3) diamond blastp(db=a 的 pep, query=b 的 pep) -> <a>_<b>.blast;
-  4) MCScanX <a>_<b>   (可选 Duplicate_gene_classifier)。
-
-注意: MCScanX 与 AGAT 的可执行文件都要在 PATH 中; 中间产物写在
-当前工作目录(建议在独立输出目录里调用)。
-"""
 import os
 import shutil
 import subprocess
-
 import pandas as pd
-
 import sub_collinearity_pre_process as pre
 
 
 def _pair_prefix(file_1, file_2):
-    """取两个文件的目录/主名, 生成跨文件一致的 basename 前缀。"""
+    """Build a consistent basename prefix from the directory/stems of the
+    two files (used for both .gff and .blast so they share the same base)."""
     d = os.path.dirname(file_1)
     n1 = os.path.splitext(os.path.basename(file_1))[0]
     n2 = os.path.splitext(os.path.basename(file_2))[0]
@@ -30,13 +15,13 @@ def _pair_prefix(file_1, file_2):
 
 
 def bed_to_gff_for_mcscanx(bed_file_1, bed_file_2):
-    """两个 AGAT bed(chr,start,end,gene_id) -> MCScanX 输入 gff:
-    chr<TAB>gene_id<TAB>start<TAB>end。返回写入的 gff 路径。"""
+    """Two AGAT beds (chr,start,end,gene_id) -> MCScanX input gff:
+    chr<TAB>gene_id<TAB>start<TAB>end. Returns the written gff path."""
     frames = []
     for bed in (bed_file_1, bed_file_2):
         df = pd.read_csv(bed, sep="\t", header=None, comment="#")
         if df.shape[1] < 4:
-            raise ValueError("bed 至少需要 4 列: %s" % bed)
+            raise ValueError("bed needs at least 4 columns: %s" % bed)
         frames.append(df.iloc[:, [0, 3, 1, 2]])     # chr, gene, start, end
     df = pd.concat(frames, ignore_index=True)
     df.columns = ["chr", "gene_id", "start", "end"]
@@ -46,11 +31,12 @@ def bed_to_gff_for_mcscanx(bed_file_1, bed_file_2):
 
 
 def mcscanx_BLASTP(seq_1, seq_2, max_seq_hit=10, evalue=1e-5, out_prefix=None):
-    """diamond: db=seq_1, query=seq_2 -> <out_prefix>.blast(outfmt6)。
+    """diamond: db=seq_1, query=seq_2 -> <out_prefix>.blast (outfmt6).
 
-    out_prefix 缺省时按两个文件名推导, 与 bed_to_gff_for_mcscanx 的
-    gff 前缀保持一致(要求 pep 与 bed 主名相同, 即同一批 *_AGAT 产物)。
-    """
+    When out_prefix is omitted it is derived from the two file names so that
+    it matches the gff prefix of bed_to_gff_for_mcscanx (this requires the
+    pep and bed files to share the same basename, i.e. the same batch of
+    *_AGAT outputs)."""
     if shutil.which("diamond") is None:
         raise FileNotFoundError("diamond not in PATH")
     if out_prefix is None:
@@ -66,7 +52,7 @@ def mcscanx_BLASTP(seq_1, seq_2, max_seq_hit=10, evalue=1e-5, out_prefix=None):
 
 
 def run_mcscanx(prefix, dup_classifier=False):
-    """MCScanX <prefix> 要求 <prefix>.gff 与 <prefix>.blast 已存在。"""
+    """Run MCScanX <prefix>; <prefix>.gff and <prefix>.blast must exist."""
     if shutil.which("MCScanX") is None:
         raise FileNotFoundError("MCScanX not in PATH")
     subprocess.run(["MCScanX", prefix], check=True)
@@ -77,7 +63,8 @@ def run_mcscanx(prefix, dup_classifier=False):
 
 
 def _match_stems(gff3_folder, genome_folder):
-    """gff 与基因组按主名匹配, 返回 [(stem, gff, genome)]。"""
+    """Match gff and genome files by basename;
+    returns [(stem, gff, genome)]."""
     gff_by = {os.path.splitext(f)[0]: os.path.join(gff3_folder, f)
               for f in os.listdir(gff3_folder)
               if os.path.splitext(f)[1].lower() in (".gff", ".gff3")}
@@ -93,14 +80,13 @@ def _match_stems(gff3_folder, genome_folder):
 
 def run_mcscanx(gff3_folder, genome_folder, max_seq_hit=10, evalue=1e-5,
                 dup_classifier=False, verbose=True):
-    """对所有组装对 a < b 执行 AGAT -> gff -> blastp -> MCScanX。
+    """Run AGAT -> gff -> blastp -> MCScanX for every assembly pair a < b.
 
-    返回 (组装名列表, 已运行的前缀列表)。
-    """
+    Returns (assembly names, prefixes that were run)."""
     matched = _match_stems(gff3_folder, genome_folder)
     stems = [m[0] for m in matched]
 
-    # 1) 每组装只跑一次 AGAT, 缓存 pep/bed
+    # 1) run AGAT once per assembly and cache pep/bed
     processed = {}
     for stem, gff, genome in matched:
         if verbose:

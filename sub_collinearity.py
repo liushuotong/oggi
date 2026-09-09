@@ -1,5 +1,4 @@
 import os
-
 import numpy as np
 import pandas as pd
 import collinearity as coli
@@ -7,23 +6,31 @@ import collinearity as coli
 BLAST6_COLS = ["qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
                "qstart", "qend", "sstart", "send", "evalue", "bitscore"]
 
+
 def load_bed(bed_path):
-    """读 AGAT bed: chr,start,end,gene_id(,score,strand,...)。返回 DataFrame。"""
+    """Read an AGAT bed: chr,start,end,gene_id(,score,strand,...).
+    Returns a DataFrame."""
     df = pd.read_csv(bed_path, sep="\t", header=None, comment="#")
     if df.shape[1] < 4:
-        raise ValueError("bed 至少需要 4 列: chr,start,end,gene_id")
+        raise ValueError("bed needs at least 4 columns: chr,start,end,gene_id")
     df = df.iloc[:, [0, 1, 2, 3]].copy()
     df.columns = ["chr", "start", "end", "gene_id"]
     if df["gene_id"].duplicated().any():
-        raise ValueError("bed 中存在重复 gene_id")
+        raise ValueError("duplicate gene_id in bed file")
     return df
 
 
 def make_window(bed, center_gene, up=10, down=10):
+    """Take the window of [center-up, center+down] consecutive genes around
+    center_gene on its chromosome (ordered by start coordinate).
+
+    Returns (window_df, center_row): window_df has columns
+    chr,start,end,gene_id,loc (loc = 0..k-1 rank inside the window, matching
+    the loc1/loc2 convention of collinearity.py)."""
     bed = load_bed(bed) if isinstance(bed, str) else bed.copy()
     row = bed[bed["gene_id"] == center_gene]
     if len(row) == 0:
-        raise KeyError("center_gene %s 不在 bed 中" % center_gene)
+        raise KeyError("center_gene %s not in bed" % center_gene)
     chr_ = row.iloc[0]["chr"]
     sub = bed[bed["chr"] == chr_].sort_values("start").reset_index(drop=True)
     i = int(sub.index[sub["gene_id"] == center_gene][0])
@@ -42,11 +49,21 @@ def _read_blast(blast):
         df = blast.copy()
     for col in ("qseqid", "sseqid", "evalue", "bitscore"):
         if col not in df.columns:
-            raise ValueError("blast 缺少列: %s" % col)
+            raise ValueError("blast is missing column: %s" % col)
     return df
+
 
 def build_points(blast_df, w1, w2, evalue=1e-5, grading=(50, 40, 25),
                  keep_hits=10):
+    """Turn the BLAST hits between two windows into the points table
+    required by collinearity.run(): DataFrame[loc1, loc2, grading].
+
+    - only hits whose two ends fall inside the respective windows are kept,
+      oriented as (window-1 gene, window-2 gene);
+    - for each unordered gene pair only the highest-bitscore hit is kept;
+    - for every window-1 query, ranks by bitscore: rank 1 = grading[0],
+      ranks 2-5 = grading[1], ranks 6-10 = grading[2], the rest dropped
+      (same grading scheme as wgdi deal_blast)."""
     blast = _read_blast(blast_df)
     blast = blast[blast["evalue"] <= evalue].copy()
 
@@ -80,6 +97,7 @@ def build_points(blast_df, w1, w2, evalue=1e-5, grading=(50, 40, 25),
     kept = hit.groupby("g1", group_keys=False).apply(grade_group)
     kept = kept[["loc1", "loc2", "grading"]].reset_index(drop=True)
     return kept.sort_values(["loc1", "loc2"]).reset_index(drop=True)
+
 
 def pairwise_comparison(windows_1, windows_2, blast=None, evalue=1e-5,
                         grading=(50, 40, 25), keep_hits=10,
@@ -130,6 +148,7 @@ def pairwise_comparison(windows_1, windows_2, blast=None, evalue=1e-5,
             })
         in_block = False
         if center_1 is not None and center_2 is not None:
+            # strict rule: the known pair must appear as one anchor row
             pair_mask = (b["loc1"].map(g1_by_loc.get) == center_1) & \
                         (b["loc2"].map(g2_by_loc.get) == center_2)
             in_block = bool(pair_mask.any())
@@ -151,27 +170,34 @@ def pairwise_comparison(windows_1, windows_2, blast=None, evalue=1e-5,
 
 
 # ======================================================================
-# 5. 批量: 对"已知基因对"(跨组装家族成员, 且窗口 blast 直接命中)逐个判共线
+# 5. Batch: for every "known gene pair" (cross-assembly family members with
+#    a direct window blast hit), test whether it lies in a collinear block
 # ======================================================================
 def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                                    up=10, down=10, evalue=1e-5,
                                    over_gap=3, gap_penalty=-1, mg=(40, 40),
                                    grading=(50, 40, 25), keep_hits=10,
                                    pvalue_accept=0.2, coverage_ratio=0.8,
-                                   max_pairs=None, verbose=True):
-    """批量判定已知基因对是否落在共线块内(窗口级亚共线性)。
+                                   max_pairs=None, pairs_out=None,
+                                   verbose=True):
+    """Batch: decide whether known gene pairs lie inside collinear blocks
+    (window-level sub-collinearity).
 
     Args:
-        manifest_rows: reduce 的清单行 dict 列表(含 assembly/bed/pep)。
-        gene_to_assembly: {gene_ID: assembly} (identify 产物)。
-        blast_file: seq_BLASTP_for_collinearity 输出的窗口 all-vs-all
-            outfmt6 文件(12 列)。
-        up/down: 窗口大小。over_gap/gap_penalty/mg/grading/keep_hits/
-            coverage_ratio: collinearity.py DP 参数。
-        pvalue_accept: 已知对所在块 pvalue <= 该值才算"落在共线块"。
-        max_pairs: 最多处理的已知对数量(调试用), None = 全部。
+        manifest_rows: list of reduce manifest row dicts (assembly/bed/pep).
+        gene_to_assembly: {gene_ID: assembly} (identify output).
+        blast_file: window all-vs-all outfmt6 file (12 columns) produced by
+            seq_BLASTP_for_collinearity.
+        up/down: window size. over_gap/gap_penalty/mg/grading/keep_hits/
+            coverage_ratio: DP parameters forwarded to collinearity.py.
+        pvalue_accept: a known pair counts as "in a collinear block" only if
+            the pvalue of its best containing block <= this value.
+        max_pairs: limit on the number of tested pairs (debug), None = all.
+        pairs_out: optional path; when given, all anchor gene pairs of
+            significant collinear blocks are written there as
+            (gene_1<TAB>gene_2, deduplicated) for collinearity_matrix.
     Returns:
-        DataFrame, 每行一个已知基因对:
+        DataFrame with one row per known gene pair:
         assembly_1, gene_1, assembly_2, gene_2, direct_hit,
         in_collinear_block, best_block_score, best_block_pvalue,
         best_block_n, n_blocks_total
@@ -182,7 +208,7 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
     members_of = {a: sorted(g for g, x in gene_to_assembly.items() if x == a)
                   for a in asms}
 
-    # ---- 窗口缓存: (asm, gene) -> (win_df, {gene: loc}) ----
+    # ---- window cache: (asm, gene) -> (win_df, {gene: loc}) ----
     win_cache = {}
 
     def window_of(asm, gene):
@@ -197,7 +223,8 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         win_cache[key] = (win, loc_of)
         return win_cache[key]
 
-    # ---- 读 blast 一次, 按组装对分组(方向规范为 q 在 a 侧) ----
+    # ---- read blast once, group by assembly pair (query side = smaller
+    # ---- assembly name)
     blast = _read_blast(blast_file)
     blast = blast[blast["evalue"] <= evalue]
     from collections import defaultdict
@@ -222,6 +249,7 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
 
     records = []
     processed = 0
+    harvested = set()      # anchor gene pairs of all significant blocks
     pair_names = sorted({k[0] for k in rows_by_pair} |
                         {k[1] for k in rows_by_pair})
     for a in pair_names:
@@ -242,7 +270,7 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                 for gb in mb:
                     canon = (ga, gb) if ga < gb else (gb, ga)
                     if canon not in hit_canon:
-                        continue          # 只测 blast 直接命中的候选同源对
+                        continue   # test only pairs with a direct blast hit
                     if max_pairs is not None and processed >= max_pairs:
                         break
                     processed += 1
@@ -255,7 +283,8 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                     if ga not in loc1 or gb not in loc2:
                         continue
 
-                    # 窗口内锚点: 每对窗口基因 (loc1,loc2) 只保留 bitscore 最高的行
+                    # anchors inside the windows: keep the highest-bitscore
+                    # row per window gene pair (loc1, loc2)
                     best = {}
                     for q, s, sc in rows_ab:
                         if q in loc1 and s in loc2:
@@ -268,14 +297,15 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                             continue
                         if k not in best or sc > best[k][0]:
                             best[k] = (sc,) + orient
-                    # 分级(仿 wgdi: 窗口1侧的每个基因, 按 bitscore 第1名50,
-                    # 2-5名40, 6-10名25, 其余丢弃)
+                    # grading (wgdi style): per window-1-side gene by
+                    # bitscore, rank 1 = 50, ranks 2-5 = 40, ranks 6-10 = 25,
+                    # the rest dropped
                     rec = {"loc1": [], "loc2": [], "grading": []}
                     by_loc1 = {}
                     for (i, j), (sc, q, s) in best.items():
                         by_loc1.setdefault(i, []).append((sc, j, q, s))
                     for i, items in by_loc1.items():
-                        items.sort(key=lambda x: -x[0])   # bitscore 降序
+                        items.sort(key=lambda x: -x[0])   # bitscore desc
                         for rank, (_sc, j, _q, _s) in enumerate(items):
                             grade = grading[0] if rank == 0 else (
                                 grading[1] if rank < 5 else (
@@ -299,12 +329,23 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                     c = coli.collinearity(_dp_options(), points)
                     raw_blocks = c.run()
                     anchor_pair = (loc1[ga], loc2[gb])
+                    rev1 = {v: k for k, v in loc1.items()}
+                    rev2 = {v: k for k, v in loc2.items()}
                     best_pv, best_sc, best_n = None, None, 0
                     n_ok = 0
                     for blk, pv, sc in raw_blocks:
                         pairs_blk = set(zip(blk["loc1"], blk["loc2"]))
                         if len(blk) >= over_gap:
                             n_ok += 1
+                        # collect anchor pairs of significant blocks (for the
+                        # collinearity matrix)
+                        if len(blk) >= over_gap and pv <= pvalue_accept:
+                            for l1, l2 in pairs_blk:
+                                gx = rev1.get(l1)
+                                gy = rev2.get(l2)
+                                if gx and gy and gx != gy:
+                                    harvested.add((gx, gy) if gx < gy
+                                                  else (gy, gx))
                         if anchor_pair in pairs_blk:
                             if best_pv is None or pv < best_pv:
                                 best_pv, best_sc, best_n = pv, sc, len(blk)
@@ -330,6 +371,13 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
     cols = ["assembly_1", "gene_1", "assembly_2", "gene_2", "direct_hit",
             "in_collinear_block", "best_block_score", "best_block_pvalue",
             "best_block_n", "n_blocks_total"]
+    if pairs_out and harvested:
+        with open(pairs_out, "w") as fh:
+            for gx, gy in sorted(harvested):
+                fh.write("%s\t%s\n" % (gx, gy))
+        if verbose:
+            print("collinear pairs written: %d -> %s"
+                  % (len(harvested), pairs_out))
     if not records:
         return pd.DataFrame(columns=cols)
     df = pd.DataFrame(records)[cols]

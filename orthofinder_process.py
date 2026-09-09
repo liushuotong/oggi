@@ -3,7 +3,6 @@ import glob
 import os
 import shutil
 import subprocess
-
 import pandas as pd
 
 _FASTA_SUFFIXES = (".fa", ".faa", ".fasta", ".fas", ".pep")

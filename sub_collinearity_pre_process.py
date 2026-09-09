@@ -115,7 +115,8 @@ def seq_BLASTP_for_collinearity(assembly_file_dict, evalue_blastp, gene_family_s
         if bed_of is not None and fasta in bed_of:
             bed_path = bed_of[fasta]
         else:
-            # 兼容旧调用: 按 pep 文件旁的同名 bed 推导
+            # legacy fallback: derive the bed next to the pep file
+            # (same basename)
             bed_path = os.path.join(os.path.dirname(fasta),
                                     os.path.splitext(os.path.basename(fasta))[0]
                                     + ".bed")

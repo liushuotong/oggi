@@ -1,0 +1,50 @@
+# OGGI pangenome pipeline - conda environment
+# Create:   conda env create -f environment.yml
+# Update:   conda env update  -f environment.yml
+# Activate: conda activate oggi
+# Verify:   python -c "import pandas, numpy, Bio" && \
+#           which diamond hmmsearch cd-hit mcl mmseqs orthofinder wgdi MCScanX \
+#                agat_sp_keep_longest_isoform.pl
+#
+# Notes:
+#   * Use Linux / WSL (AGAT and MCScanX are Linux-oriented, not Windows);
+#   * If the solver fails: conda config --set channel_priority flexible
+#     and retry, or switch python to 3.10;
+#   * agat and orthofinder pull in many dependencies, so the first solve
+#     may take a while.
+
+name: oggi
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # ---- core python environment ----
+  - python=3.11
+  - pip
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - biopython
+
+  # ---- sequence search / clustering ----
+  - diamond                 # oggi identify/subcoli/mcscanx/wgdi search engine
+  - hmmer                   # oggi identify (hmmsearch)
+  - cd-hit                  # oggi cluster -M cdhit / cdhit_process
+  - mmseqs2                 # oggi mmseqs (easy-cluster / easy-search)
+  - mcl                     # oggi cluster -M mcl
+
+  # ---- gene family / collinearity tools ----
+  - orthofinder             # oggi orthofinder (v3, bundles diamond/mcl/fastme)
+  - mcscanx                 # oggi mcscanx (MCScanX + Duplicate_gene_classifier)
+  - wgdi                    # oggi wgdi (-icl sub-collinearity)
+
+  # ---- GFF preprocessing (AGAT: longest isoform -> CDS -> pep + bed) ----
+  - agat
+
+  # ---- optional: to use the pip version of wgdi (matching the local
+  #      wgdi-master 0.75), remove the conda wgdi above and uncomment: ----
+  # - pip:
+  #     - wgdi==0.75

@@ -9,6 +9,8 @@ import sys
 PROTEIN_EXTS = (".pep", ".fa", ".fasta", ".faa")
 GFF_EXTS = (".gff", ".gff3")
 
+# pass-through subcommands: (module, entry function); all remaining
+# arguments are handed to that module's own argparse
 TOOL_CLIS = {
     "cdhit": ("cdhit_process", "run_cdhit"),
     "mmseqs": ("mmseqs_process", "run_mmseqs_cli"),
@@ -22,6 +24,7 @@ def _stem(path):
 
 
 def load_manifest(manifest_path):
+    """Read the reduce manifest: one 'assembly<TAB>pep<TAB>bed' per line."""
     rows = []
     with open(manifest_path) as fh:
         for line in fh:
@@ -111,6 +114,7 @@ def run_identify(args):
 
     gene_family_seq = args.output + ".family.fa"
 
+    # gfi.main_identification -> ({gene: assembly}, set of genes, fasta path)
     gene_to_assembly, ids, seq_path = gfi.main_identification(
         assembly_file_dict, hmm_dict, ref_seq_dict,
         args.evalue_hmm, args.evalue_blastp,
@@ -125,7 +129,7 @@ def run_identify(args):
 def add_subcoli_parser(sp):
     p = sp.add_parser(
         "subcoli",
-        help="sub-collinearity: ±UP/DOWN windows around family members -> "
+        help="sub-collinearity: +/-UP/DOWN windows around family members -> "
              "all-vs-all -> collinear-block check for known gene pairs")
     p.add_argument("--manifest", required=True,
                    help="assembly_manifest.tsv from reduce")
@@ -166,7 +170,7 @@ def run_subcoli(args):
     identification_result = {0: ids,
                              1: [pep_of[gene_to_assembly[g]] for g in ids]}
 
-    # step 1: 窗口提取 + all-vs-all(可用 --blast 跳过 diamond)
+    # step 1: window extraction + all-vs-all (may skip diamond with --blast)
     if args.blast:
         blastp_out = args.blast
         print("use precomputed blastp: %s" % blastp_out)
@@ -182,24 +186,28 @@ def run_subcoli(args):
         print("window blastp: %s (%d window genes)"
               % (blastp_out, len(window_ids)))
 
-    # step 2: 批量判定已知基因对(跨组装家族成员且 blast 直接命中)
-    #         是否落在共线块内
+    # step 2: batch-test whether known gene pairs (cross-assembly family
+    #         members with a direct blast hit) lie inside collinear blocks;
+    #         also export all significant collinear anchor pairs
+    pairs_tsv = args.output + ".collinear_pairs.tsv"
     pairs = sci.batch_member_pair_collinearity(
         rows, gene_to_assembly, blastp_out,
         up=args.up, down=args.down, evalue=args.evalue,
-        pvalue_accept=args.pvalue, max_pairs=args.max_pairs)
+        pvalue_accept=args.pvalue, max_pairs=args.max_pairs,
+        pairs_out=pairs_tsv)
     out_tsv = args.output + ".known_pairs.collinearity.tsv"
     pairs.to_csv(out_tsv, sep="\t", index=False)
     print("subcoli done: %d known pairs tested, %d in collinear blocks -> %s"
           % (len(pairs),
              int(pairs["in_collinear_block"].sum()) if len(pairs) else 0,
              out_tsv))
+    print("collinear pairs (for cluster): %s" % pairs_tsv)
 
 def add_cluster_parser(sp):
     p = sp.add_parser("cluster", help="cluster gene families (MCL or cd-hit)")
     p.add_argument("-i", "--input", required=True,
-                   help="cd-hit: fasta; mcl 全流程: 窗口 blastp(outfmt6); "
-                        "mcl 朴素: abc 边文件")
+                   help="cd-hit: fasta; mcl full pipeline: window blastp "
+                        "(outfmt6); mcl plain: abc edge file")
     p.add_argument("-o", "--output", required=True, help="output prefix")
     p.add_argument("-M", "--method", choices=["mcl", "cdhit"], default="mcl")
     p.add_argument("-I", "--inflation", type=float, default=1.5,
@@ -207,9 +215,14 @@ def add_cluster_parser(sp):
     p.add_argument("-c", "--identity", type=float, default=0.8,
                    help="identity threshold (cd-hit)")
     p.add_argument("--seq", default=None,
-                   help="mcl 全流程: 窗口基因 fasta(确定 sorted_id)")
+                   help="mcl full pipeline: window-gene fasta (defines sorted_id)")
     p.add_argument("--gene-map", default=None,
-                   help="mcl 全流程: gene_ID<TAB>assembly_ID tsv(identify 产物)")
+                   help="mcl full pipeline: gene_ID<TAB>assembly_ID tsv "
+                        "(identify output)")
+    p.add_argument("--collinear-pairs", default=None,
+                   help="mcl full pipeline: real collinear gene-pair file "
+                        "(subcoli *.collinear_pairs.tsv, or an MCScanX/wgdi "
+                        "-icl block file / two-column pair file)")
     p.add_argument("--tree", default=None,
                    help="optional species tree .nwk for assembly penalty (mcl)")
     p.add_argument("-t", "--threads", type=int, default=8)
@@ -228,9 +241,9 @@ def run_cluster(args):
               % (len(table), table["ogg_cluster"].nunique(), out_tsv))
         return
 
-    # ---------------- MCL ----------------
     if args.seq and args.gene_map:
-        # 全流程: 4 矩阵乘积(alignment*similarity*collinearity*assembly树)
+        # full pipeline: four-matrix product
+        # (alignment*similarity*collinearity*assembly-tree)
         from Bio import SeqIO
         import MCL_matrix as mm
 
@@ -246,13 +259,14 @@ def run_cluster(args):
                 f = line.split("\t")
                 if len(f) >= 2:
                     gene_to_assembly[f[0]] = f[1]
-        # 未映射的基因(如窗口邻居)按 ID 前缀归属
+        # unmapped genes (e.g. window neighbours) are assigned by ID prefix
         for g in sorted_id:
             if g not in gene_to_assembly:
                 gene_to_assembly[g] = g.split("_", 1)[0]
 
         matrix = mm.create_mcl_matrix(args.seq, args.input, sorted_id,
-                                      gene_to_assembly, tree_file=args.tree)
+                                      gene_to_assembly, tree_file=args.tree,
+                                      collinearity_file=args.collinear_pairs)
         clusters = mm.run_mcl(matrix, inflation=args.inflation)
         with open(args.output, "w") as out:
             for cl in clusters:
@@ -261,7 +275,7 @@ def run_cluster(args):
               % (len(clusters), args.output))
         return
 
-    # 朴素 ABC 直跑(缺少 --seq/--gene-map 时的回退)
+    # plain mcl --abc fallback (when --seq/--gene-map are missing)
     print("note: 4-matrix pipeline needs --seq + --gene-map; "
           "fall back to plain mcl --abc")
     subprocess.run(["mcl", args.input, "--abc", "-I", str(args.inflation),
@@ -286,7 +300,7 @@ def run_mcscanx(args):
 
 def main():
     argv = sys.argv[1:]
-    if argv and argv[0] in TOOL_CLIS:
+    if argv and argv[0] in TOOL_CLIS:      # tool modules have their own CLI
         mod_name, func_name = TOOL_CLIS[argv[0]]
         mod = importlib.import_module(mod_name)
         sys.argv = [sys.argv[0] + " " + argv[0]] + argv[1:]

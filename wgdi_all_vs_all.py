@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import subprocess
-
 import pandas as pd
 
 BLAST6_COLS = ["qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
@@ -14,14 +13,14 @@ BLAST6_COLS = ["qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
 def read_agat_bed(bed_path):
     df = pd.read_csv(bed_path, sep="\t", header=None, comment="#")
     if df.shape[1] < 4:
-        raise ValueError("bed 至少需要 4 列: %s" % bed_path)
+        raise ValueError("bed needs at least 4 columns: %s" % bed_path)
     df = df.iloc[:, :6].copy()
     df.columns = (["chr", "start", "end", "gene_id"] +
                   ["score", "strand"][: max(0, df.shape[1] - 4)])
     if "strand" not in df.columns:
         df["strand"] = "+"
     if df["gene_id"].duplicated().any():
-        raise ValueError("bed 有重复 gene_id: %s" % bed_path)
+        raise ValueError("duplicate gene_id in bed: %s" % bed_path)
     return df
 
 
@@ -40,7 +39,7 @@ def bed_to_wgdi_gff(bed_path, out_path):
 
 
 def bed_to_wgdi_lens(bed_path, out_path):
-    """AGAT bed -> wgdi lens: chr<TAB>长度bp<TAB>基因数。"""
+    """AGAT bed -> wgdi lens: chr<TAB>length_bp<TAB>n_genes."""
     bed = read_agat_bed(bed_path)
     rows = []
     for chr_, g in bed.groupby("chr", sort=False):
@@ -72,7 +71,8 @@ def write_wgdi_conf(conf_path, gff1, gff2, lens1, lens2, blast, savefile,
                     process=8, over_gap=5, grading="50,30,25", mg="25,25",
                     pvalue=0.2, blast_reverse="false",
                     comparison="genomes"):
-    """写 wgdi -icl 的 [collinearity] 配置(键与官方 example 一致)。"""
+    """Write the wgdi -icl [collinearity] config (keys identical to the
+    official example)."""
     conf = configparser.ConfigParser()
     conf.add_section("collinearity")
     for k, v in [("gff1", gff1), ("gff2", gff2), ("lens1", lens1),
@@ -90,7 +90,7 @@ def write_wgdi_conf(conf_path, gff1, gff2, lens1, lens2, blast, savefile,
 
 
 def run_wgdi_icl(conf_path, verbose=True):
-    """运行 wgdi -icl conf。"""
+    """Run wgdi -icl with the given config file."""
     if shutil.which("wgdi") is None:
         raise FileNotFoundError("wgdi not in PATH (pip3 install wgdi)")
     cmd = ["wgdi", "-icl", conf_path]
