@@ -104,7 +104,9 @@ def add_identify_parser(sp):
                    help="HMM profiles, comma-separated paths")
     p.add_argument("--ref", required=True,
                    help="reference family sequences, comma-separated fasta paths")
-    p.add_argument("-o", "--output", required=True, help="output prefix")
+    p.add_argument("-o", "--output", required=True,
+                   help="output DIRECTORY (per-assembly .hmm/.blastp, "
+                        "gene_family.fa, gene_to_assembly.tsv)")
     p.add_argument("-E", "--evalue-hmm", type=float, default=1e-5)
     p.add_argument("-e", "--evalue-blastp", type=float, default=1e-5)
     p.add_argument("-t", "--threads", type=int, default=8)
@@ -119,19 +121,17 @@ def run_identify(args):
     hmm_dict = [[_stem(h), h] for h in args.hmm.split(",")]
     ref_seq_dict = [[_stem(r), r] for r in args.ref.split(",")]
 
-    gene_family_seq = args.output + ".family.fa"
-
     # gfi.main_identification -> ({gene: assembly}, set of genes, fasta path)
+    # writes <output_dir>/gene_to_assembly.tsv and gene_family.fa
     gene_to_assembly, ids, seq_path = gfi.main_identification(
         assembly_file_dict, hmm_dict, ref_seq_dict,
         args.evalue_hmm, args.evalue_blastp,
-        gene_family_seq, args.threads)
+        args.output, args.threads)
 
-    with open(args.output + ".gene_to_assembly.tsv", "w") as out:
-        for g in sorted(gene_to_assembly):
-            out.write("%s\t%s\n" % (g, gene_to_assembly[g]))
     print("identify done: %d genes from %d assemblies -> %s"
-          % (len(ids), len(rows), seq_path))
+          % (len(ids), len(rows), args.output))
+    print("family fasta : %s" % seq_path)
+    print("gene map     : %s/gene_to_assembly.tsv" % args.output)
 
 def add_subcoli_parser(sp):
     p = sp.add_parser(
