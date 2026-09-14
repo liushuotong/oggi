@@ -7,6 +7,8 @@ import subprocess
 import time
 import sys
 import json
+import os
+import signal
 from collections import defaultdict
 from pathlib import Path
 from .data import fasta, partition, write_fasta, digest
@@ -19,23 +21,82 @@ class Runner:
     def __init__(self, manifest, out, config):
         self.manifest, self.out, self.config = manifest, Path(out), config
         self.started = time.monotonic()
+        self.candidate_deadline = None
+        self.heartbeat_seconds = 30.0
 
-    def run(self, cmd, cwd):
+    def begin_candidate(self):
+        self.candidate_deadline = time.monotonic() + self.config['candidate_timeout']
+
+    def end_candidate(self):
+        self.candidate_deadline = None
+
+    @staticmethod
+    def _stop(proc):
+        # MMseqs easy workflows launch shell scripts and grandchildren. On
+        # Ubuntu, terminate this invocation's session, not unrelated MMseqs jobs.
+        if os.name == 'posix':
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        elif proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        if os.name == 'posix':
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        elif proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+    def run(self, cmd, cwd, timeout=None, env=None):
         remaining = self.config['max_seconds'] - (time.monotonic()-self.started)
         if remaining <= 0:
             raise TimeoutError('global execution time budget exhausted')
+        if self.candidate_deadline is not None:
+            remaining = min(remaining, self.candidate_deadline-time.monotonic())
+        if remaining <= 0:
+            raise TimeoutError('candidate execution time budget exhausted')
+        limit = min(remaining, self.config['candidate_timeout'], timeout if timeout is not None else math.inf)
         entry = {'argv': list(map(str, cmd)), 'cwd': str(cwd), 'returncode': None}
+        if env:
+            entry['environment_overrides'] = dict(env)
         self.manifest['commands'].append(entry)
         log = Path(cwd) / ('command_%03d.log' % len(self.manifest['commands']))
         entry['log'] = str(log)
         started = time.monotonic()
+        entry['timeout_seconds'] = limit
+        proc = None
         try:
             with log.open('w', encoding='utf-8') as f:
-                proc = subprocess.run(entry['argv'], cwd=str(cwd), stdout=f, stderr=subprocess.STDOUT,
-                                      timeout=min(remaining, self.config['candidate_timeout']), check=False)
+                proc = subprocess.Popen(entry['argv'], cwd=str(cwd), stdout=f, stderr=subprocess.STDOUT,
+                                        start_new_session=(os.name == 'posix'),
+                                        env=dict(os.environ, **env) if env else None)
+                deadline = started + limit
+                while proc.poll() is None:
+                    left = deadline-time.monotonic()
+                    if left <= 0:
+                        raise TimeoutError('command timed out after %.1fs; see %s' % (limit, log))
+                    try:
+                        proc.wait(timeout=min(left, self.heartbeat_seconds))
+                    except subprocess.TimeoutExpired:
+                        print('  waiting %.0fs: %s; log: %s' % (
+                            time.monotonic()-started, Path(entry['argv'][0]).name, log), flush=True)
             entry['returncode'] = proc.returncode
             if proc.returncode:
                 raise RuntimeError('command failed (%d); see %s' % (proc.returncode, log))
+        except BaseException as exc:
+            if proc is not None:
+                self._stop(proc)
+                entry['returncode'] = proc.returncode
+            entry['status'] = 'interrupted' if isinstance(exc, KeyboardInterrupt) else 'failed'
+            entry['error'] = str(exc) or type(exc).__name__
+            raise
         finally:
             entry['seconds'] = time.monotonic()-started
 
@@ -176,7 +237,14 @@ def sequence_groups(method, genes, params, context, work):
     work.mkdir(parents=True, exist_ok=True)
     inp = work / 'target.fa'
     write_fasta(inp, {g: context['seqs'][g] for g in genes})
-    runner, threads = context['runner'], context['args'].threads
+    runner = context['runner']
+    threads = context.get('sequence_threads', context['args'].threads)
+    run_options = {}
+    if 'command_timeout' in context:
+        run_options['timeout'] = context['command_timeout']
+    if method == 'mmseqs' and 'sequence_threads' in context:
+        # Upstream MMSEQS_NUM_THREADS overrides --threads. Limit just this child.
+        run_options['env'] = {'MMSEQS_NUM_THREADS': str(threads)}
     identity, coverage = params['identity'], params['coverage']
     groups = defaultdict(list)
     unsupported = []
@@ -185,7 +253,7 @@ def sequence_groups(method, genes, params, context, work):
         runner.run(['mmseqs', 'easy-cluster', str(inp), str(prefix), str(work / 'tmp'),
                     '--min-seq-id', str(identity), '-c', str(coverage), '--cov-mode', '0',
                     '--alignment-mode', '3', '--seq-id-mode', '0', '--cluster-mode', '0',
-                    '--threads', str(threads)], work)
+                    '--threads', str(threads)], work, **run_options)
         with Path(str(prefix) + '_cluster.tsv').open() as f:
             for line in f:
                 rep, member = line.rstrip('\n').split('\t')[:2]
@@ -201,7 +269,7 @@ def sequence_groups(method, genes, params, context, work):
             prefix = work / 'cluster'
             runner.run(['cd-hit', '-i', str(inp), '-o', str(prefix), '-c', str(identity),
                         '-G', '0', '-aL', str(coverage), '-aS', str(coverage), '-n', str(word),
-                        '-g', '1', '-d', '0', '-l', '10', '-T', str(threads), '-M', '4000'], work)
+                        '-g', '1', '-d', '0', '-l', '10', '-T', str(threads), '-M', '4000'], work, **run_options)
             cluster = None
             for line in Path(str(prefix) + '.clstr').read_text().splitlines():
                 if line.startswith('>'):
@@ -386,13 +454,8 @@ def execute(method, params, context, work):
         groups, unsupported = hogs(context)
         factors = ['full-proteome HOG at ' + context['args'].hog_level]
         if method != 'orthofinder':
-            refined = []
-            unsupported = list(unsupported)
-            for i, group in enumerate(groups):
-                sub, missing = sequence_groups(method.split('-')[1], group, params, context, work / ('hog_%06d' % i))
-                refined.extend(sub)
-                unsupported.extend(missing)
-            groups = refined
+            from .hybrid import refine_hogs
+            groups, unsupported = refine_hogs(method, groups, unsupported, params, context, work, sequence_groups)
             factors.append('within-HOG sequence subdivision only; no cross-HOG merges')
     elif method in ('mmseqs', 'cdhit'):
         groups, unsupported = sequence_groups(method, list(context['seqs']), params, context, work)

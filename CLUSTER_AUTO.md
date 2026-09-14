@@ -254,17 +254,61 @@ deliberately for 401 complete proteomes.
 
 ```bash
 python oggi.py cluster -i family.fa --gene-map gene_map.tsv -M auto \
-  --orthofinder-results ~/oggi_v1/ath_genome_and_annotation/orthofinder_ath6_trial/Results_Sep14 \
+  --orthofinder-results ~/oggi_v1/ath_genome_and_annotation/orthofinder_ath6_trial_outgroup/Results_Sep14 \
   --hog-level N1 --target hog -o runs/reused_hog_auto
 ```
 
-This reads the exact completed result, requiring `Log.txt`, and records its hash,
-path and node. The copied Results_Sep14 has N1–N4 but no N0: N1 excludes tibet.
-Genes outside that node or absent from HOGs are retained as unresolved singletons.
-For a six-accession root comparison obtain N0; do not substitute N1 and claim
-equivalent coverage. Each comparison uses ONE node. `orthofinder-mmseqs` and
+This reads the exact completed result, requiring `Log.txt` unless explicitly
+using an export, and records its hash, path and node. Check node leaves in the
+labelled species tree: in the supplied outgroup run N1 is the six-accession
+ingroup, but node numbers can mean different scopes in other runs. Genes outside
+that node or absent from HOGs are retained as unresolved singletons. Each
+comparison uses ONE node. `orthofinder-mmseqs` and
 `orthofinder-cdhit` subdivide separately inside each HOG and cannot merge HOGs.
 Sequence subdivision is not evidence of improved orthology.
+
+### Within-HOG runtime, progress and checkpoints
+
+The hybrid adapters run one sequence clustering job per HOG. A method can
+therefore process many HOGs before finishing its final `clusters.tsv`.
+Each HOG now prints its index/total, source HOG ID, gene count, thread count and
+completion time. A subprocess still running after 30 seconds prints its log
+path and elapsed time. The current state is also available in
+`candidates/<id>/hybrid_progress.json`.
+
+`--hybrid-threads 1` is the default per-HOG thread count, bounded above by `-t`.
+It controls both MMseqs and CD-HIT hybrid jobs; the ordinary full-family methods
+continue to use `-t`. For MMseqs hybrid jobs, the child environment also sets
+`MMSEQS_NUM_THREADS` to this value because upstream documents that it overrides
+`--threads`. The parent environment is unchanged, and overrides are recorded in
+the command manifest. Clustering thresholds, the `easy-cluster` workflow and
+within-HOG boundaries remain unchanged; no different algorithm is silently used.
+
+`--hybrid-timeout 300` limits each within-HOG subprocess to 300 seconds. Increase
+it for large HOGs as needed. The configuration's `candidate_timeout` now spans
+all external commands within a candidate, and `max_seconds` is the total run
+budget. On timeout, the hybrid candidate fails explicitly and auto can continue
+to other methods; partial HOG refinements are not scored as a finished method.
+On Ubuntu/POSIX, each invocation has its own process session, which is terminated
+on timeout or Ctrl+C, including its shell/child processes. On Windows the direct
+subprocess is terminated.
+
+Each completed HOG has a validated checkpoint under
+`candidates/<id>/hog_checkpoints/`. Checkpoints are keyed by run fingerprint,
+method, parameters, per-HOG threads, gene IDs and sequence hashes; they contain
+complete subgroup membership and unresolved IDs with an integrity checksum.
+Writes are atomic. On an unchanged `--resume`, completed candidate results and
+completed HOG checkpoints are reused, while the unfinished HOG runs in a new
+work directory. Corrupt checkpoints fail validation; neither temporary MMseqs
+files nor a partially written cluster table count as a completed checkpoint.
+
+After Ctrl+C, the run state and interrupted candidate are saved and the run lock
+is released. Reuse the same output path and unchanged command with `--resume`.
+After installing this code update, use a new output path: old code fingerprints
+are not overridden and earlier runs have no per-HOG checkpoints to validate.
+
+MMseqs environment and workflow documentation:
+https://github.com/soedinglab/MMseqs2/wiki#environment-variables-used-by-mmseqs2
 
 ### External evaluation constraints and a common trusted alignment
 
@@ -434,7 +478,8 @@ valid literal gene ID and is not interpreted as a missing ID by this parser.
 
 Same configuration, data hashes, code hashes and tool versions can be resumed by
 adding `--resume` to the same command. Successful partitions/table checksums are
-validated; failed methods retry in a new work directory. Changed fingerprints
+validated; failed methods retry in a new work directory, with validated per-HOG
+checkpoints reused for hybrids. Changed fingerprints
 are refused. Original inputs may not lie inside the output directory. A lock
 prevents concurrent use; after a hard kill, verify no live process before removing
 the stale `.cluster.lock`. Source input files and tool logs are not overwritten.

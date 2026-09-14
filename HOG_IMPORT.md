@@ -41,8 +41,8 @@ Only N1–N4 are present locally. The labelled species tree gives these scopes:
 | N4 | yilong, kondara | 27306 | 53772 |
 
 N0 is the root containing all six assemblies, including tibet. To import root
-HOGs, obtain the original `Phylogenetic_Hierarchical_Orthogroups/N0.tsv` if it
-exists on the server, then run the same command with `--level N0`.
+HOGs, obtain the original `Phylogenetic_Hierarchical_Orthogroups/N1.tsv` if it
+exists on the server, then run the same command with `--level N1`.
 Missing local N0 does not establish why it is absent from the copy. N1 is not a
 six-assembly substitute. `--level OG` imports the separate Orthogroups.tsv data;
 these are OG assignments, not reconstructed root HOGs.

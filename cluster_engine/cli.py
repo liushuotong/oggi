@@ -41,6 +41,10 @@ def add_parser(sp):
     p.add_argument('--orthofinder-export', action='store_true',
                    help='with --orthofinder-results: accept an exported HOG set plus labelled species tree without Log.txt; record completion as unverified')
     p.add_argument('--hog-level', default='N0')
+    p.add_argument('--hybrid-threads', type=int, default=1,
+                   help='threads per HOG for OrthoFinder+MMseqs/CD-HIT (default 1, capped by -t)')
+    p.add_argument('--hybrid-timeout', type=float, default=300.,
+                   help='seconds per within-HOG subprocess (default 300); total candidate/global budgets also apply')
     p.add_argument('--tree', help='user-supplied rooted assembly tree; tip names equal assembly_ID')
     p.add_argument('--gene-tree', help='family gene tree in Newick with branch lengths; tips equal protein IDs')
     p.add_argument('--tree-threshold', type=float, default=.1,
@@ -101,6 +105,11 @@ def configure(args):
             raise ValueError(key+' must be a positive integer')
     if args.threads < 1 or not re.fullmatch(r'N\d+', args.hog_level):
         raise ValueError('positive threads and HOG node N<number> required')
+    if getattr(args, 'hybrid_threads', 1) < 1:
+        raise ValueError('hybrid threads must be positive')
+    hybrid_timeout = getattr(args, 'hybrid_timeout', 300.)
+    if not math.isfinite(hybrid_timeout) or hybrid_timeout <= 0:
+        raise ValueError('hybrid timeout must be finite and positive')
     return config
 
 
@@ -334,6 +343,7 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
     plans = candidates_for(methods, args, config)
     context = dict(args=args, seqs=seqs, assemblies=assemblies, constraints=constraints, config=config,
                    manifest=manifest, work=work, runner=Runner(manifest, out, config),
+                   fingerprint=fingerprint,
                    gene_tree_data=gene_tree_data, gene_tree_error=gene_tree_error,
                    cached_hog_source=previous.get('orthofinder_source') if previous else None)
     if previous and 'orthofinder_source' in previous:
@@ -346,6 +356,7 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
         directory.mkdir(exist_ok=True)
         record = dict(id=cid, method=method, parameters=params, runtime_seconds=0, cache=False)
         started = time.monotonic()
+        interrupted = False
         try:
             cache = directory/'result.json'
             table_path = directory/'clusters.tsv'
@@ -368,6 +379,8 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
                     launched += 1
                     candidate_work = work/cid
                     candidate_work.mkdir()
+                    context['candidate_directory'] = directory
+                    context['runner'].begin_candidate()
                     print('running ' + cid, flush=True)
                     labels, unsupported, factors = execute(method, params, context, candidate_work)
                     c = dict(id=cid, method=method, params=params, labels=labels, unsupported=unsupported,
@@ -377,8 +390,13 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
                     json_write(cache, c)
                     record.update(status='success', reason='validated exact target partition')
                     candidates.append(c)
+        except KeyboardInterrupt:
+            record.update(status='interrupted', reason='user interruption; completed HOG checkpoints retained for --resume')
+            interrupted = True
         except Exception as exc:
             record.update(status='failed', reason=type(exc).__name__ + ': ' + str(exc))
+        finally:
+            context['runner'].end_candidate()
         if method.startswith('orthofinder') and 'orthofinder_source' in manifest:
             source = manifest['orthofinder_source']
             for key in ('import_status', 'assigned_gene_count', 'unresolved_gene_count', 'assignment_coverage'):
@@ -389,7 +407,14 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
         record['runtime_seconds'] = time.monotonic()-started
         statuses.append(record)
         manifest['candidate_status'] = statuses
+        if interrupted:
+            manifest['state'] = 'interrupted'
         json_write(out/'manifest.json', manifest)
+        if interrupted:
+            tsv(out/'method_status.tsv', statuses, ['id', 'method', 'parameters', 'status', 'reason', 'runtime_seconds', 'cache',
+                'import_status', 'hog_assigned_gene_count', 'hog_unresolved_gene_count', 'hog_assignment_coverage'])
+            print('Interrupted. Resume the same command/output with --resume; validated HOG checkpoints will be reused.', flush=True)
+            raise KeyboardInterrupt
     scores, silhouettes, agreements, common, omitted = evaluate(candidates, list(seqs), distance, constraints, config, evaluation_genes, metric_inputs) if candidates else ([], {}, {}, [], [config['ranking_metric']])
     manifest.update(state='complete', successful_candidates=len(candidates), method_count=len({c['method'] for c in candidates}),
                     algorithm_category_count=len({CATEGORIES[c['method']] for c in candidates}),
