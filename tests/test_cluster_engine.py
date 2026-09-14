@@ -228,6 +228,8 @@ class ClusterTests(unittest.TestCase):
             self.assertEqual(next(r['status'] for r in status if r['method']=='cdhit'), 'failed')
             self.assertEqual(first['score_status'], 'provisional')
             self.assertEqual(len(first['tied_candidates']), 2)
+            self.assertIsNone(first['selected_candidate'])
+            self.assertEqual(data.read_tsv(self.root/'out'/'selected_clusters.tsv'), [])
             run.reset_mock()
             args.resume = True
             second = cli.run(args)

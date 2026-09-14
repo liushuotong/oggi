@@ -11,17 +11,8 @@ BLAST6_COLS = ["qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
                "qstart", "qend", "sstart", "send", "evalue", "bitscore"]
 
 def read_agat_bed(bed_path):
-    df = pd.read_csv(bed_path, sep="\t", header=None, comment="#")
-    if df.shape[1] < 4:
-        raise ValueError("bed needs at least 4 columns: %s" % bed_path)
-    df = df.iloc[:, :6].copy()
-    df.columns = (["chr", "start", "end", "gene_id"] +
-                  ["score", "strand"][: max(0, df.shape[1] - 4)])
-    if "strand" not in df.columns:
-        df["strand"] = "+"
-    if df["gene_id"].duplicated().any():
-        raise ValueError("duplicate gene_id in bed: %s" % bed_path)
-    return df
+    from bed_utils import read_bed
+    return read_bed(bed_path)
 
 
 def bed_to_wgdi_gff(bed_path, out_path):
@@ -99,8 +90,10 @@ def run_wgdi_icl(conf_path, verbose=True):
         print(" ".join(cmd))
     subprocess.run(cmd, check=True)
 
+_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 _HEADER_RE = re.compile(
-    r"# Alignment (\d+): score=([\d.]+) pvalue=([\d.]+) N=(\d+) (\S+)&(\S+) (plus|minus)")
+    r"#\s*Alignment\s+(\d+):\s+score=(" + _NUMBER + r")\s+pvalue=(" + _NUMBER +
+    r")\s+N=(\d+)\s+(\S+)&(\S+)\s+(plus|minus)")
 
 
 def parse_wgdi_collinearity(savefile):
@@ -120,12 +113,16 @@ def parse_wgdi_collinearity(savefile):
                           "n_genes": int(m.group(4)),
                           "orientation": m.group(7)}
                 continue
+            if line.lstrip().startswith('#'):
+                if 'Alignment' in line:
+                    raise ValueError('unrecognized WGDI block header: ' + line)
+                continue
             if header is None:
                 continue
             f = line.split()
-            if len(f) >= 5:                     # gene1 loc1 gene2 loc2 strand
+            if len(f) >= 4:                     # gene1 loc1 gene2 loc2 [strand]
                 rows.append({**header, "gene_1": f[0], "loc1": f[1],
-                             "gene_2": f[2], "loc2": f[3], "strand": f[4]})
+                             "gene_2": f[2], "loc2": f[3], "strand": f[4] if len(f)>4 else header['orientation']})
     anchors = pd.DataFrame(rows) if rows else pd.DataFrame(
         columns=["block_id", "chr1", "chr2", "score", "pvalue", "n_genes",
                  "orientation", "gene_1", "gene_2", "strand"])

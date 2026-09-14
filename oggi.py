@@ -81,7 +81,9 @@ def run_reduce(args):
                 continue
             prefix = os.path.join(args.output, asm + "_AGAT")
             pep_out = prefix + ".pep"
-            if args.skip_existing and os.path.exists(pep_out):
+            complete = all(os.path.isfile(prefix + ext) and os.path.getsize(prefix + ext) > 0
+                           for ext in ('.gff', '.pep', '.bed'))
+            if args.skip_existing and complete:
                 print("skip existing: %s" % pep_out)
             else:
                 # AGAT's Bio::DB::Fasta cannot index unwrapped fasta lines
@@ -276,7 +278,9 @@ def main():
     if not hasattr(args, "func"):
         parser.print_help()
         sys.exit(1)
-    args.func(args)
+    result = args.func(args)
+    if args.module == 'cluster' and isinstance(result, dict) and result.get('status') == 'failed':
+        sys.exit(2)
 
 
 if __name__ == "__main__":

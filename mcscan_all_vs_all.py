@@ -51,7 +51,7 @@ def mcscanx_BLASTP(seq_1, seq_2, max_seq_hit=10, evalue=1e-5, out_prefix=None):
     return out_prefix + ".blast"
 
 
-def run_mcscanx(prefix, dup_classifier=False):
+def run_mcscanx_pair(prefix, dup_classifier=False):
     """Run MCScanX <prefix>; <prefix>.gff and <prefix>.blast must exist."""
     if shutil.which("MCScanX") is None:
         raise FileNotFoundError("MCScanX not in PATH")
@@ -108,7 +108,7 @@ def run_mcscanx(gff3_folder, genome_folder, max_seq_hit=10, evalue=1e-5,
             bed_to_gff_for_mcscanx(bed_a, bed_b)          # prefix.gff
             mcscanx_BLASTP(pep_a, pep_b, max_seq_hit=max_seq_hit,
                            evalue=evalue, out_prefix=prefix)
-            run_mcscanx(prefix, dup_classifier=dup_classifier)
+            run_mcscanx_pair(prefix, dup_classifier=dup_classifier)
             prefixes.append(prefix)
 
     return stems, prefixes

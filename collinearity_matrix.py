@@ -68,10 +68,16 @@ def parse_collinearity_pairs(block_file, min_n=1):
             continue
         if cur_n is None or cur_n < min_n:
             continue
+        if ln.lstrip().startswith('#'):
+            continue
         f = ln.split()
         if len(f) < 4:          # in-block row: geneA locA geneB locB [strand]
             continue
-        a, b = f[0], f[2]
+        mcscan = re.match(r"^\s*\d+\s*-\s*\d+:\s+(\S+)\s+(\S+)", ln)
+        if mcscan:                         # MCScanX permits padding within rank labels
+            a, b = mcscan.groups()
+        else:                              # WGDI/OGGI: geneA locA geneB locB
+            a, b = f[0], f[2]
         if a != b:
             pairs.append((a, b) if a < b else (b, a))
     return _pairs_df(pairs)

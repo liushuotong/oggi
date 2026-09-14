@@ -178,12 +178,10 @@ def seq_BLASTP_for_collinearity(assembly_file_dict, evalue_blastp, gene_family_s
             raise FileNotFoundError(f"bed not found: {bed_path}")
 
         by_chr = {}
-        with open(bed_path) as fh:
-            for line in fh:
-                if not line.strip() or line.startswith("#"):
-                    continue
-                c = line.rstrip("\n").split("\t")
-                by_chr.setdefault(c[0], []).append((int(c[1]), c[3]))
+        from bed_utils import read_bed
+        bed = read_bed(bed_path)
+        for r in bed.to_dict('records'):
+            by_chr.setdefault(r['chr'], []).append((int(r['start']), r['gene_id']))
 
         need = set(member_genes)
         for g in member_genes:

@@ -64,6 +64,12 @@ def agreement(candidate, candidates):
 
 
 def totals(scores, weights, minimum_blocks=2, min_evidence_coverage=0.0):
+    for s in scores:
+        for metric in WEIGHTS:
+            value = s.get(metric)
+            if value is not None and (not isinstance(value, (int, float, np.number)) or
+                    not math.isfinite(value) or not 0 <= value <= 1):
+                raise ValueError('invalid score metric %s: expected finite [0,1] or None' % metric)
     active = [k for k, w in weights.items() if w > 0]
     common = [k for k in active if all(s[k] is not None for s in scores)]
     omitted = [k for k in active if k not in common]

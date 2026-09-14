@@ -95,8 +95,8 @@ Run `python oggi.py -h` (and `python oggi.py <module> -h`) for every option.
 
 For every `.gff/.gff3` file (matched to a genome FASTA by basename), runs the
 AGAT chain `agat_sp_keep_longest_isoform.pl` ->
-`agat_sp_extract_sequences.pl` -> `agat_sp_translate_sequences.pl` ->
-`agat_sp_gff_to_bed.pl`, producing `*_AGAT.pep` and `*_AGAT.bed` plus the
+`agat_sp_extract_sequences.pl` (CDS and `-p` protein extraction) ->
+`agat_convert_sp_gff2bed.pl`, producing `*_AGAT.pep` and `*_AGAT.bed` plus the
 central manifest file:
 
 ```

@@ -168,7 +168,7 @@ def sequence_groups(method, genes, params, context, work):
             prefix = work / 'cluster'
             runner.run(['cd-hit', '-i', str(inp), '-o', str(prefix), '-c', str(identity),
                         '-G', '0', '-aL', str(coverage), '-aS', str(coverage), '-n', str(word),
-                        '-g', '1', '-d', '0', '-T', str(threads), '-M', '4000'], work)
+                        '-g', '1', '-d', '0', '-l', '10', '-T', str(threads), '-M', '4000'], work)
             cluster = None
             for line in Path(str(prefix) + '.clstr').read_text().splitlines():
                 if line.startswith('>'):

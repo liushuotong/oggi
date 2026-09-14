@@ -61,6 +61,8 @@ def read_constraints(path, genes, target, declared_target=None):
 
 
 def boundary(labels, rows):
+    if not labels:
+        raise ValueError('boundary scoring requires a nonempty target partition')
     evaluation = [r for r in rows if r['role'] == 'evaluation']
     rates, metrics = {}, {}
     for relation, label in [('same', 'positive'), ('different', 'negative')]:

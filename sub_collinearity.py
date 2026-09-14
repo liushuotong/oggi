@@ -10,14 +10,8 @@ BLAST6_COLS = ["qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
 def load_bed(bed_path):
     """Read an AGAT bed: chr,start,end,gene_id(,score,strand,...).
     Returns a DataFrame."""
-    df = pd.read_csv(bed_path, sep="\t", header=None, comment="#")
-    if df.shape[1] < 4:
-        raise ValueError("bed needs at least 4 columns: chr,start,end,gene_id")
-    df = df.iloc[:, [0, 1, 2, 3]].copy()
-    df.columns = ["chr", "start", "end", "gene_id"]
-    if df["gene_id"].duplicated().any():
-        raise ValueError("duplicate gene_id in bed file")
-    return df
+    from bed_utils import read_bed
+    return read_bed(bed_path)[['chr', 'start', 'end', 'gene_id']]
 
 
 def make_window(bed, center_gene, up=10, down=10):
@@ -214,28 +208,22 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
     members_of = {a: sorted(g for g, x in gene_to_assembly.items() if x == a)
                   for a in asms}
 
-    # ---- assembly name of a window gene --------------------------------
-    # Window genes come from AGAT pep files whose IDs use the gene-ID
-    # prefix of the annotation (e.g. "col_AT5G38860.1"), which is NOT the
-    # manifest assembly name (e.g. "01.col").  Learn the mapping from the
-    # identify id-table: gene ID prefix -> manifest assembly name.
-    prefix2asm = {}
-    for g, a in gene_to_assembly.items():
-        p = g.split("_", 1)[0]
-        if p in prefix2asm and prefix2asm[p] != a:
-            raise ValueError(
-                "gene-ID prefix %r is shared by assemblies %r and %r; "
-                "cannot attribute window genes" % (p, prefix2asm[p], a))
-        prefix2asm[p] = a
-
-    def asm_of(gene_id):
-        return prefix2asm.get(gene_id.split("_", 1)[0])
-
-    # ---- read blast once; attribute rows to assembly pairs via the
-    # ---- gene-ID prefix learned from the id-table, and index hits by
-    # ---- gene so per-pair window anchors are cheap to collect
+    # Attribute window neighbours by explicit BED membership, never ID prefixes.
     blast = _read_blast(blast_file)
     blast = blast[blast["evalue"] <= evalue]
+    hit_ids = set(blast["qseqid"].astype(str)) | set(blast["sseqid"].astype(str))
+    gene_assembly = dict(gene_to_assembly)
+    for asm, bed_path in bed_of.items():
+        for gene in load_bed(bed_path)["gene_id"]:
+            if gene not in hit_ids:
+                continue
+            if gene in gene_assembly and gene_assembly[gene] != asm:
+                raise ValueError("ambiguous BED gene_ID across assemblies: " + gene)
+            gene_assembly[gene] = asm
+
+    def asm_of(gene_id):
+        return gene_assembly.get(gene_id)
+
     from collections import defaultdict
     rows_by_pair = defaultdict(list)      # (asm_a, asm_b) -> [(gene_a, gene_b, bitscore)]
     idx_by_pair = defaultdict(dict)       # (asm_a, asm_b) -> {gene_a: [(gene_b, bitscore)]}

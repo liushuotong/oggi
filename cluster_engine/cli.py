@@ -171,10 +171,9 @@ def run(args):
     if any(out == Path(p) or out in Path(p).parents for p in hashes):
         raise ValueError('output must not contain original input files')
     versions = tool_versions()
-    code_files = list(Path(__file__).parent.glob('*.py')) + [Path(__file__).parents[1]/name for name in
-                  ('orthofinder_process.py', 'assembly_matrix.py', 'collinearity_matrix.py')]
+    code_files = list(Path(__file__).parent.glob('*.py')) + list(Path(__file__).parents[1].glob('*.py'))
     identity = {'inputs': hashes, 'config': config, 'tools': versions,
-                'code': {p.name: digest(p) for p in code_files},
+                'code': {str(p.relative_to(Path(__file__).parents[1])): digest(p) for p in code_files},
                 'args': {k: v for k, v in vars(args).items() if k not in ('func', 'output', 'resume')}}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     manifest_path = out/'manifest.json'

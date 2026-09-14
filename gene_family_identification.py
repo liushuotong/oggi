@@ -82,8 +82,8 @@ def blastp_results_process(blastp_path):
 
 
 def identification_extract_seq(id, seq_file, output_file):
-    with open(output_file, "w") as out_f:
-        for rec in SeqIO.parse(seq_file, "fasta"):
+    with open(output_file, "w") as out_f, open(seq_file) as seq_f:
+        for rec in SeqIO.parse(seq_f, "fasta"):
             if rec.id in id:
                 SeqIO.write(rec, out_f, "fasta")
 
@@ -122,12 +122,16 @@ def main_identification(assembly_file_dict, hmm_dict, ref_seq_dict,
             print("WARNING: assembly %s: no genes identified" % assembly_name)
             continue
         for gene_id in ids:
+            if gene_id in gene_to_assembly:
+                raise ValueError('gene ID occurs in multiple input assemblies: ' + gene_id)
             gene_to_assembly[gene_id] = assembly_name
         part = os.path.join(output_dir, "%s.family.fa" % assembly_name)
         identification_extract_seq(ids, assembly_fasta, part)
         family_parts.append(part)
         sorted_id |= ids
 
+    if not sorted_id:
+        raise ValueError('no family genes identified in any assembly; inspect HMM/reference intersection and thresholds')
     family_fasta = os.path.join(output_dir, "gene_family.fa")
     with open(family_fasta, "w") as out:
         for part in family_parts:

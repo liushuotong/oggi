@@ -38,16 +38,20 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
         best = ordered[0]['total_score']
         tied = [s['id'] for s in ordered if best is None or
                 (s['total_score'] is not None and best-s['total_score'] <= config['tie_tolerance'])]
-        winner = tied[0]
+        representative = tied[0]
+        winner = representative if len(tied) == 1 else None
         provisional = any(s['status'] == 'provisional' for s in ordered)
         status = 'ambiguous' if len(tied) > 1 else 'provisional' if provisional else 'selected'
-        selected = cluster_rows(by_id[winner]['labels'], assemblies)
+        selected = cluster_rows(by_id[winner]['labels'], assemblies) if winner else []
+        tsv(out/'representative_clusters.tsv', cluster_rows(by_id[representative]['labels'], assemblies),
+            ['gene_ID', 'assembly_ID', 'cluster_ID'])
     else:
         tied, winner, selected, status, provisional = [], None, [], 'failed', True
     selection = {
         'status': status, 'score_status': 'provisional' if provisional else 'formal',
         'selected_candidate': winner, 'tied_candidates': tied,
-        'selected_file_semantics': 'deterministic representative of tied candidates, NOT unique best' if len(tied) > 1 else 'highest comparable score candidate' if winner else 'no successful candidate',
+        'representative_candidate': representative if ordered else None,
+        'selected_file_semantics': 'empty: tied candidates retained; representative_clusters.tsv is for inspection only' if len(tied) > 1 else 'highest comparable score candidate' if winner else 'no successful candidate',
         'reason': 'common-metric experimental geometric score; NA never treated as zero; no biological optimality claim',
         'missing_metrics': omitted, 'major_conflicts': conflicts[:20], 'conflict_count': len(conflicts),
         'alternatives': [s['id'] for s in ordered if s['id'] != winner],
