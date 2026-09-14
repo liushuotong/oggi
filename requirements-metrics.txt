@@ -1,0 +1,4 @@
+# Optional metrics; core Silhouette and Dunn need only the existing NumPy dependency.
+scikit-learn>=1.4,<2
+networkx>=3,<4
+hdbscan>=0.8.40,<0.9

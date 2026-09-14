@@ -182,11 +182,17 @@ longer calls it. No input-prefix inference is used by the new module.
 
 Auto runs eligible candidates within configured budgets, records skipped/failed
 methods, validates complete partitions, and scores on a fixed common gene set
-and distance matrix. No standard answer is required. Both Silhouette and Dunn
-are reported; the default ranking score is `50*(mean_silhouette+1)` on 0..100.
+and distance matrix. No standard answer is required. Auto automatically prepares
+features and a common graph and reports Silhouette, Dunn, Modularity, DB, CH and
+DBCV separately, with raw values and 0..100 display scores. No extra feature or
+graph file is needed. See `METRIC_SCORES.md` for definitions and limitations.
+The default ranking score is `50*(mean_silhouette+1)` on 0..100.
 These are **internal cluster validity scores, not orthology accuracy**. The old
-B/R/A/Q geometric score is no longer used. Without usable distances, clustering
-results are delivered with `not_evaluable` scores and no numerical recommendation.
+B/R/A/Q geometric score is no longer used. When no evaluation distance/alignment
+or gene tree is supplied, auto derives Hellinger distances from protein dipeptide
+composition. A malformed explicitly supplied source is never silently replaced.
+Undefined metrics remain NA with reasons. Install metric dependencies once using
+`python -m pip install -r requirements-metrics.txt` (or the updated conda environment).
 
 `-M tree --gene-tree family.nwk --tree-threshold 0.1` clusters using only
 gene-tree path lengths and complete linkage. `--tree` remains the separate
@@ -278,9 +284,10 @@ All wrappers convert their results into shared long tables where possible:
 
 ## Practical notes
 
-* **Scale**: cluster adapters use target-family graphs. The common Q distance
-  matrix is bounded by `max_distance_genes` (default 2000); above this limit Q
-  is NA for every candidate. Whole-proteome inference uses OrthoFinder separately.
+* **Scale**: cluster adapters use target-family graphs. The common distance
+  matrix is bounded by `max_distance_genes` (default 2000). The auto FASTA fallback
+  uses a fixed sample above this limit; explicit distance/tree sources retain
+  their budget checks. Coverage is reported. Whole-proteome inference uses OrthoFinder separately.
 * **e-value semantics**: window all-vs-all searches use a restricted database;
   prefer bitscore thresholds for filtering, or pass a fixed
   `--dbsize`/`--max-target-seqs` so e-values stay comparable across runs.

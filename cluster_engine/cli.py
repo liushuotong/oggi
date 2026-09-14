@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import time
 import uuid
+import numpy as np
 from pathlib import Path
 from .data import digest, json_write, tsv, read_tsv, fasta, mapping, distance_matrix, cluster_rows, partition
 from .evidence import read_constraints
@@ -23,6 +24,7 @@ DEFAULTS = {
     'min_blocks': 2, 'min_evidence_coverage': .1, 'tie_tolerance': 0.01,
     'synteny_boost': 2.0, 'seed': 20260914,
     'ranking_metric': 'silhouette', 'min_evaluation_coverage': 0.0,
+    'auto_feature_dimensions': 32, 'auto_graph_neighbors': 15,
 }
 
 
@@ -30,7 +32,8 @@ def add_parser(sp):
     p = sp.add_parser('cluster', help='unified target-family clustering and experimental auto comparison')
     p.add_argument('-i', '--input', required=True, help='target family protein FASTA')
     p.add_argument('-o', '--output', required=True, help='new report directory; --resume to reuse matching run')
-    p.add_argument('-M', '--method', choices=list(METHODS)+['auto', 'mcl'], default='auto')
+    p.add_argument('-M', '--method', choices=list(METHODS)+['auto', 'mcl'], default='auto',
+                   help='auto runs available methods and automatically prepares all six metric inputs')
     p.add_argument('--gene-map', required=True, help='gene_ID/assembly_ID TSV (header optional); no ID-prefix inference')
     p.add_argument('--target', choices=['hog', 'locus'], default='hog')
     p.add_argument('--proteomes', help='explicit declaration: directory of COMPLETE proteomes, one per assembly')
@@ -50,6 +53,8 @@ def add_parser(sp):
     p.add_argument('--evaluation-distances', help='gene_a/gene_b/distance TSV, complete reliable pairwise matrix')
     p.add_argument('--distance-provenance', help='required with external distances: alignment, identity, coverage and gaps definition')
     p.add_argument('--evaluation-alignment', help='trusted single-family aligned protein FASTA; identical target gene set')
+    p.add_argument('--evaluation-features', help='TSV: gene_ID then numeric features; exactly all target IDs; DB/CH/DBCV')
+    p.add_argument('--evaluation-graph', help='TSV: gene_a/gene_b/weight; fixed undirected nonnegative graph for modularity')
     p.add_argument('--config', help='JSON budgets, ranking_metric, coverage requirement and parameter grid')
     p.add_argument('--resume', action='store_true')
     p.add_argument('-t', '--threads', type=int, default=8)
@@ -87,6 +92,9 @@ def configure(args):
         raise ValueError('invalid tie tolerance')
     if set(config['grid'])-set(METHODS):
         raise ValueError('unknown grid method')
+    for key in ('auto_feature_dimensions', 'auto_graph_neighbors'):
+        if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
+            raise ValueError(key+' must be a positive integer')
     if args.threads < 1 or not re.fullmatch(r'N\d+', args.hog_level):
         raise ValueError('positive threads and HOG node N<number> required')
     return config
@@ -128,7 +136,7 @@ def tool_versions():
     import platform
     from importlib.metadata import version, PackageNotFoundError
     result['python'] = {'version': platform.python_version()}
-    for package in ('numpy', 'scipy', 'biopython'):
+    for package in ('numpy', 'scipy', 'biopython', 'scikit-learn', 'networkx', 'hdbscan'):
         try:
             result[package] = {'version': version(package)}
         except PackageNotFoundError:
@@ -150,6 +158,9 @@ def tool_versions():
 
 def input_hashes(args):
     files = []
+    for key in ('evaluation_features', 'evaluation_graph'):
+        if getattr(args, key, None):
+            files.append(Path(getattr(args, key)))
     for key in ('input', 'gene_map', 'tree', 'gene_tree', 'collinear_pairs', 'constraints', 'similarity',
                 'evaluation_distances', 'evaluation_alignment', 'config'):
         value = getattr(args, key)
@@ -166,6 +177,9 @@ def input_hashes(args):
 
 
 def run(args):
+    for key in ('evaluation_features', 'evaluation_graph'):
+        if getattr(args, key, None):
+            setattr(args, key, str(Path(getattr(args, key)).resolve()))
     if args.method == 'mcl':
         args.method = 'weighted-mcl' if args.tree or args.collinear_pairs or args.constraints else 'similarity-mcl'
         if args.seq:
@@ -182,7 +196,12 @@ def run(args):
     if args.evaluation_distances and (not args.distance_provenance or args.evaluation_alignment):
         raise ValueError('external distance requires --distance-provenance and cannot combine with alignment')
     config = configure(args)
+    if args.method == 'auto':
+        from .auto_metrics import check_dependencies
+        check_dependencies()
     seqs = fasta(args.input)
+    from .metric_reports import load_inputs
+    load_inputs(list(seqs), getattr(args, 'evaluation_features', None), getattr(args, 'evaluation_graph', None))
     assemblies = mapping(args.gene_map, seqs)
     constraints, conflicts = read_constraints(args.constraints, seqs, args.target, args.constraints_target)
     retained = []
@@ -236,6 +255,8 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
                     categories=CATEGORIES, state='running',
                     evaluation_independence='user must attest source independence; role/source/block/pair overlap checked')
     json_write(out/'manifest.json', manifest)
+    from .metric_reports import load_inputs, FORMULAS
+    metric_inputs = load_inputs(list(seqs), getattr(args, 'evaluation_features', None), getattr(args, 'evaluation_graph', None))
     gene_tree_data, gene_tree_error = None, None
     if args.gene_tree:
         try:
@@ -255,8 +276,30 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
         distance_info['source'] = 'external-distances' if args.evaluation_distances else 'alignment' if args.evaluation_alignment else None
         if gene_tree_error and not (args.evaluation_distances or args.evaluation_alignment):
             distance_info['reason'] = gene_tree_error
+    if args.method == 'auto' and distance is None and not (args.gene_tree or args.evaluation_distances or args.evaluation_alignment):
+        if metric_inputs['features'] is not None and len(seqs) <= config['max_distance_genes']:
+            from scipy.spatial.distance import pdist, squareform
+            evaluation_genes = list(seqs)
+            distance = squareform(pdist(metric_inputs['features']))
+            distance_info = dict(source='explicit-features-euclidean', complete=True, reason=None,
+                                 definition='Euclidean distance on explicit evaluation features')
+        elif metric_inputs['features'] is None:
+            from .auto_metrics import sequence_distances
+            evaluation_genes, distance, distance_info = sequence_distances(seqs, config['max_distance_genes'], config['seed'])
+            print('auto evaluation: dipeptide composition fallback; this is not a phylogenetic distance', flush=True)
     if distance is None:
         evaluation_genes = []
+    if args.method == 'auto':
+        # Canonical input order makes eigendecomposition and graph ties reproducible.
+        order = sorted(range(len(evaluation_genes)), key=lambda i: evaluation_genes[i])
+        evaluation_genes = [evaluation_genes[i] for i in order]
+        if distance is not None:
+            distance = distance[np.ix_(order, order)]
+        from .auto_metrics import prepare_inputs
+        metric_inputs, manifest['auto_metric_inputs'] = prepare_inputs(
+            evaluation_genes, distance, metric_inputs, config, out, distance_info.get('source'))
+        print('auto evaluation: prepared shared distances, features and graph for %d/%d genes' %
+              (len(evaluation_genes), len(seqs)), flush=True)
     manifest['distance'] = dict(distance_info, provenance=args.distance_provenance)
     scope_set = set(evaluation_genes)
     manifest['evaluation_scope'] = dict(genes=evaluation_genes, input_gene_count=len(seqs),
@@ -264,7 +307,7 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
         excluded_genes=sorted(set(seqs)-scope_set),
         rule='fixed once from the shared distance source before candidate execution; no per-method filtering')
     manifest['scoring'] = dict(ranking_metric=config['ranking_metric'], reference_labels_required=False,
-        legacy_geometric_score_used=False, diagnostic_metrics=['silhouette', 'dunn'],
+        legacy_geometric_score_used=False, diagnostic_metrics=list(FORMULAS),
         tree_used_for_evaluation=distance_info.get('source') == 'gene-tree',
         caution='internal validity conditional on distance source; tree used for construction and scoring is not independent validation')
     tsv(out/'evaluation_genes.tsv', [dict(gene_ID=g, included=g in scope_set,
@@ -323,7 +366,7 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
         statuses.append(record)
         manifest['candidate_status'] = statuses
         json_write(out/'manifest.json', manifest)
-    scores, silhouettes, agreements, common, omitted = evaluate(candidates, list(seqs), distance, constraints, config, evaluation_genes) if candidates else ([], {}, {}, [], [config['ranking_metric']])
+    scores, silhouettes, agreements, common, omitted = evaluate(candidates, list(seqs), distance, constraints, config, evaluation_genes, metric_inputs) if candidates else ([], {}, {}, [], [config['ranking_metric']])
     manifest.update(state='complete', successful_candidates=len(candidates), method_count=len({c['method'] for c in candidates}),
                     algorithm_category_count=len({CATEGORIES[c['method']] for c in candidates}),
                     common_score_metrics=common, omitted_score_metrics=omitted,

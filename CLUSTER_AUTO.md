@@ -52,8 +52,14 @@ python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
 
 No OrthoFinder run starts here. MMseqs/CD-HIT and similarity-MCL run if available;
 weighted-MCL needs additional construction evidence. Tree requires --gene-tree.
-With no usable shared distances, scores are NA and status is not_evaluable;
-partitions are still delivered, but no numerical recommendation is made.
+Auto generates Hellinger distances from protein dipeptide composition when no
+evaluation distance/alignment or gene tree is supplied. All six metrics are
+prepared automatically: Silhouette, Dunn, Modularity, DB, CH and DBCV. Generated
+PCoA features, common kNN graph and provenance are saved under `evaluation/`.
+No separate feature/graph flags are needed. See `METRIC_SCORES.md` for inputs,
+sampling budgets, percentage formulas and undefined-case handling. A supplied
+invalid distance source is not silently replaced; mathematically undefined
+metrics remain NA. Composition distances are not phylogenetic evidence.
 
 ### Gene-tree clustering and evaluation (no standard answer required)
 

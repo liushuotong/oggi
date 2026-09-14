@@ -56,6 +56,8 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
     selection = {
         'status': status, 'score_status': 'internal_validity' if eligible else 'not_evaluable',
         'ranking_metric': config['ranking_metric'], 'best_score': best,
+        'distance_source': manifest.get('distance', {}).get('source'),
+        'auto_metric_inputs': manifest.get('auto_metric_inputs'),
         'score_scale': '0..100; silhouette: 50*(s+1); Dunn: 100*D/(1+D)',
         'selected_candidate': winner, 'tied_candidates': tied,
         'recommended_methods': sorted({by_id[c]['method'] for c in tied}),
@@ -86,7 +88,20 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
         'singleton_gene_fraction', 'full_singleton_gene_fraction', 'input_retention',
         'assignment_coverage', 'unresolved_fraction', 'quality_reason',
         'partition_signature', 'evaluation_partition_signature', 'score_config', 'runtime_seconds']
+    from .metric_reports import FORMULAS
+    score_fields += [name+suffix for name in FORMULAS for suffix in ('_raw', '_score_100')]
     tsv(out/'scores.tsv', ordered, score_fields)
+    metric_rows = [dict(id=s['id'], method=s['method'], **detail)
+                   for s in ordered for detail in s.get('metric_details', [])]
+    metric_fields = ['id', 'method', 'metric', 'raw_score', 'score_100', 'direction',
+                     'status', 'reason', 'formula', 'source', 'gene_count']
+    tsv(out/'metric_scores.tsv', metric_rows, metric_fields)
+    (out/'metrics').mkdir(exist_ok=True)
+    for name in FORMULAS:
+        tsv(out/'metrics'/(name+'.tsv'), [r for r in metric_rows if r['metric'] == name], metric_fields)
+    json_write(out/'score_formulas.json', dict(formulas=FORMULAS,
+        convention='fixed monotone display transformations, not accuracy; no composite score; missing=NA',
+        note='CH and Dunn use arbitrary display scale 1; equal percentages across metrics are not comparable'))
     method_summary = []
     for method in sorted({s['method'] for s in scores}):
         rows = [s for s in ordered if s['method'] == method]
@@ -132,16 +147,18 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
                 mean_within_distance=sum(vals)/len(vals) if vals else None,
                 diameter=max(vals) if vals else None,
                 mean_silhouette=sum(sv)/len(sv) if sv else None,
+                silhouette_score_100=50*(sum(sv)/len(sv)+1) if sv else None,
                 distance_status='evaluable' if vals else 'not_evaluable',
                 distance_reason='' if vals else 'fewer than two genes with shared evaluation distances'))
         directory = out/'candidates'/c['id']
         tsv(directory/'cluster_statistics.tsv', stats, ['cluster_ID', 'size', 'evaluated_size',
-            'evaluation_coverage', 'mean_within_distance', 'diameter', 'mean_silhouette',
+            'evaluation_coverage', 'mean_within_distance', 'diameter', 'mean_silhouette', 'silhouette_score_100',
             'distance_status', 'distance_reason'])
         tsv(directory/'silhouette.tsv', [dict(gene_ID=g, included_in_evaluation=g in indices,
+            silhouette_score_100=50*(sil[g]+1) if g in sil else None,
             silhouette=sil.get(g), reason='' if g in sil else
                 'outside common scope' if g not in indices else score_by_id[c['id']]['quality_reason'])
-            for g in genes], ['gene_ID', 'included_in_evaluation', 'silhouette', 'reason'])
+            for g in genes], ['gene_ID', 'included_in_evaluation', 'silhouette', 'silhouette_score_100', 'reason'])
         chart(directory/'diagnostics.svg', c['id'], [
             ('OGG size (one observation per cluster)', [s['size'] for s in stats]),
             ('Mean within-cluster distance; singleton=NA', [s['mean_within_distance'] for s in stats if s['mean_within_distance'] is not None]),
@@ -154,10 +171,13 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
     json_write(out/'manifest.json', manifest)
     summary = ['# Cluster run results', '', 'Selection: ' + status,
         'Ranking metric: ' + config['ranking_metric'],
+        'Distance source: ' + str(manifest.get('distance', {}).get('source', 'unspecified')),
         'Common evaluation coverage: %d / %d (%.2f%%)' % (
             len(evaluation_genes), len(genes), 100*len(evaluation_genes)/len(genes)),
         '', 'Internal quality scores do not measure orthology accuracy.',
         'When the construction tree supplies evaluation distances, this is an internal-fit comparison.',
+        'Auto-generated inputs and projection diagnostics, when used: evaluation/metadata.json.',
+        'auto-dipeptide distances measure composition, not evolutionary distance.',
         '', '| Candidate | OGGs | Score (0..100) | Silhouette | Dunn |',
         '| --- | ---: | ---: | ---: | ---: |']
     for s in ordered:
@@ -172,7 +192,9 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
     elif len(tied) > 1:
         summary += ['', 'Best candidates have identical full membership. The common partition is selected;',
                     'the representative method name is not evidence that one equivalent method is superior.']
-    summary += ['', 'See scores.tsv for both metrics, method_summary.tsv for parameter ranges,',
+    summary += ['', 'See metric_scores.tsv and metrics/*.tsv for six independent raw and 0..100 metrics.',
+                'Percentage conversions are display conventions, not accuracy; do not average different metrics.',
+                'See scores.tsv for metrics, method_summary.tsv for parameter ranges,',
                 'evaluation_genes.tsv for fixed scope, and method_status.tsv for failures/skips.',
                 'Compare candidates within this run; report distance source and parameter search when publishing.']
     (out/'SUMMARY.md').write_text('\n'.join(summary)+'\n', encoding='utf-8')

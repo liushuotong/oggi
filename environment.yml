@@ -28,6 +28,9 @@ dependencies:
   - pandas
   - matplotlib
   - biopython
+  - scikit-learn>=1.4,<2    # auto DB / CH and DBCV dependencies
+  - networkx>=3,<4         # auto modularity
+  - hdbscan>=0.8.40,<0.9   # auto density validity
 
   # ---- sequence search / clustering ----
   - diamond                 # oggi identify/subcoli/mcscanx/wgdi search engine

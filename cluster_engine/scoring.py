@@ -134,7 +134,7 @@ def partition_signature(labels, genes):
     return hashlib.sha256(json.dumps(sorted(groups.values()), ensure_ascii=True).encode()).hexdigest()
 
 
-def evaluate(candidates, genes, distance, constraints, config, evaluation_genes=None):
+def evaluate(candidates, genes, distance, constraints, config, evaluation_genes=None, metric_inputs=None):
     scope = list(genes) if evaluation_genes is None else list(evaluation_genes)
     if len(scope) != len(set(scope)) or not set(scope) <= set(genes):
         raise ValueError('invalid common evaluation gene scope')
@@ -172,6 +172,11 @@ def evaluate(candidates, genes, distance, constraints, config, evaluation_genes=
             formula='50*(silhouette_mean+1)' if metric == 'silhouette' else '100*separation/(separation+diameter)',
             evaluation_scope_sha256=scope_hash, no_reference_labels=True,
             min_evaluation_coverage=config.get('min_evaluation_coverage', 0))
+        from .metric_reports import independent_metrics
+        row['metric_details'] = independent_metrics(c['labels'], scope, q, metric_inputs)
+        for detail in row['metric_details']:
+            row[detail['metric']+'_raw'] = detail['raw_score']
+            row[detail['metric']+'_score_100'] = detail['score_100']
         scores.append(row)
         silhouettes[c['id']] = sil
         agreements[c['id']] = raw

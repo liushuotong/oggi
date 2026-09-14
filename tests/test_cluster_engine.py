@@ -226,11 +226,14 @@ class ClusterTests(unittest.TestCase):
             saved = (self.root/'out'/'selected_clusters.tsv').read_bytes()
             status = data.read_tsv(self.root/'out'/'method_status.tsv')
             self.assertEqual(next(r['status'] for r in status if r['method']=='cdhit'), 'failed')
-            self.assertEqual(first['score_status'], 'not_evaluable')
-            self.assertEqual(first['tied_candidates'], [])
+            # Auto now derives distances without extra input. These identical
+            # toy proteins have silhouette=0 (50 display points), Dunn undefined.
+            self.assertEqual(first['score_status'], 'internal_validity')
+            self.assertEqual(first['best_score'], 50)
+            self.assertEqual(len(first['tied_candidates']), 2)
             self.assertEqual(len(first['equivalent_partitions'][0]), 2)
-            self.assertIsNone(first['selected_candidate'])
-            self.assertEqual(data.read_tsv(self.root/'out'/'selected_clusters.tsv'), [])
+            self.assertIsNotNone(first['selected_candidate'])
+            self.assertEqual(len(data.read_tsv(self.root/'out'/'selected_clusters.tsv')), 4)
             run.reset_mock()
             args.resume = True
             second = cli.run(args)
