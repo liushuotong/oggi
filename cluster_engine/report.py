@@ -123,11 +123,15 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
     evaluation_genes = manifest['evaluation_scope']['genes']
     indices = {g: i for i, g in enumerate(evaluation_genes)}
     unsupported = []
+    hog_source = manifest.get('orthofinder_source')
+    hog_reasons = {r['gene_ID']: r['reason'] for r in (hog_source or {}).get('assignments', [])
+                   if r['status'] == 'unresolved'}
     for c in candidates:
         for g in genes:
             reasons = []
             if g in c['unsupported']:
-                reasons.append('unresolved assignment; see candidate adapter factors')
+                reasons.append(hog_reasons.get(g, 'unresolved assignment; see candidate adapter factors')
+                               if c['method'].startswith('orthofinder') else 'unresolved assignment; see candidate adapter factors')
             if g not in indices:
                 reasons.append('outside fixed common evaluation scope')
             if reasons:
@@ -166,7 +170,14 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
               missing_reasons={1: 'No evaluable within-cluster pairs',
                                2: score_by_id[c['id']]['quality_reason'] or 'No evaluable genes'})
     tsv(out/'unsupported_genes.tsv', unsupported, ['candidate', 'gene_ID', 'assembly_ID', 'reason'])
-    tsv(out/'method_status.tsv', statuses, ['id', 'method', 'parameters', 'status', 'reason', 'runtime_seconds', 'cache'])
+    tsv(out/'method_status.tsv', statuses, ['id', 'method', 'parameters', 'status', 'reason', 'runtime_seconds', 'cache',
+        'import_status', 'hog_assigned_gene_count', 'hog_unresolved_gene_count', 'hog_assignment_coverage'])
+    if hog_source:
+        from .hog_import import write_audit
+        write_audit(out, hog_source)
+        selection['orthofinder_import'] = {k: hog_source.get(k) for k in (
+            'level', 'import_status', 'assigned_gene_count', 'input_gene_count', 'imported_HOG_count',
+            'unresolved_gene_count', 'assignment_coverage', 'error')}
     json_write(out/'selection.json', selection)
     json_write(out/'manifest.json', manifest)
     summary = ['# Cluster run results', '', 'Selection: ' + status,
@@ -186,13 +197,21 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
             s['id'], s['OGG_count'], fmt(s['total_score']), fmt(s['silhouette_mean']), fmt(s['dunn_index'])))
     summary += ['', 'Each successful candidate has a complete target partition:', '']
     summary += ['- %s: candidates/%s/clusters.tsv' % (c['id'], c['id']) for c in candidates]
+    if hog_source:
+        summary += ['', 'OrthoFinder HOG import: %s; node %s; assigned %s / %s; unresolved %s.' % (
+            hog_source.get('import_status'), hog_source.get('level'), hog_source.get('assigned_gene_count', 'NA'),
+            hog_source.get('input_gene_count', 'NA'), hog_source.get('unresolved_gene_count', 'NA')),
+            'See orthofinder_import.json, orthofinder_assembly_mapping.tsv and orthofinder_assignments.tsv.',
+            'HOG assignment coverage is distinct from input retention and evaluation coverage.']
+        if hog_source.get('error'):
+            summary += ['HOG import error: ' + hog_source['error']]
     if not winner:
         summary += ['', 'No unique evaluable best partition: selected_clusters.tsv contains only a header.',
                     'representative_clusters.tsv, when present, is an inspection copy.']
     elif len(tied) > 1:
         summary += ['', 'Best candidates have identical full membership. The common partition is selected;',
                     'the representative method name is not evidence that one equivalent method is superior.']
-    summary += ['', 'See metric_scores.tsv and metrics/*.tsv for six independent raw and 0..100 metrics.',
+    summary += ['', 'See metric_scores.tsv and metrics/*.tsv for six separately reported raw and 0..100 metrics.',
                 'Percentage conversions are display conventions, not accuracy; do not average different metrics.',
                 'See scores.tsv for metrics, method_summary.tsv for parameter ranges,',
                 'evaluation_genes.tsv for fixed scope, and method_status.tsv for failures/skips.',

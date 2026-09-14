@@ -27,6 +27,62 @@ header `gene_ID<TAB>assembly_ID` or a legacy two-column headerless table. IDs mu
 be globally unique in the target FASTA; conflicting/duplicate/missing map entries
 are errors. Extra mapped genes are ignored. Protein isoform suffixes are retained.
 
+### Importing existing OrthoFinder HOGs
+
+```bash
+python oggi.py cluster -M auto -i family.fa --gene-map gene_map.tsv \
+  --orthofinder-results /path/to/Results_Sep14 --hog-level N1 \
+  --gene-tree family.nwk --collinear-pairs synteny.tsv -o runs/auto_N1
+```
+
+The original gene map can use names such as `01.col` while OrthoFinder uses
+`01.col_AGAT`. Exact assembly names take priority. Otherwise, actual target gene
+memberships in the selected HOG table must identify exactly one OrthoFinder
+column for each inferred alias. Aliases must be one-to-one. Ambiguous/conflicting
+memberships fail explicitly; no gene-prefix or `_AGAT` string heuristic is used.
+An assembly with no matching gene IDs is left unresolved, never guessed. Gene
+IDs, isoform suffixes, the input gene map and downstream assembly labels stay
+unchanged. The full-proteome launch route still requires exact proteome names
+and sequences before launching OrthoFinder.
+
+When a labelled species tree is available, the importer verifies that the
+selected node exists exactly once and that all nonempty HOG assignments are
+inside it. Empty outgroup columns in an ingroup HOG file are valid. Targets from
+outside the selected node or absent from that HOG file remain unresolved
+singletons. Without a labelled tree the node scope is recorded as unverified;
+N1 is never assumed to mean the ingroup just from its number.
+
+The importer prints matched targets, source HOG count, unresolved targets and
+alias count. It also exports:
+
+- `orthofinder_import.json`: completion evidence, node leaves, import status,
+  counts, checksums and errors.
+- `orthofinder_assembly_mapping.tsv`: original/source assembly names, mapping
+  rule and supporting target-gene counts.
+- `orthofinder_assignments.tsv`: every target's original HOG, parent OG, gene
+  tree clade, pure-OrthoFinder cluster ID and assignment/missing reason. Hybrid
+  candidates may further split these HOGs; their final labels remain in their
+  own `candidates/*/clusters.tsv`.
+
+Zero imported target genes fail the OrthoFinder candidates, rather than producing
+an apparently successful all-unresolved partition. Other auto methods continue.
+A nonzero partial import remains usable and explicitly marked `partial`.
+`method_status.tsv` includes `import_status` and `hog_*` coverage counts, while
+`scores.tsv` retains each final candidate's assignment coverage. Input retention,
+HOG assignment coverage and evaluation coverage are separate quantities.
+
+Normally the results need `Log.txt` recording `run completed`. For a downloaded
+subset containing HOG tables and `Species_Tree/SpeciesTree_rooted_node_labels.txt`,
+add **`--orthofinder-export`** with `--orthofinder-results`. This explicitly permits
+an absent Log.txt; completion is recorded as unverified. An existing incomplete
+log is still rejected. There is no fabricated log or rerun of OrthoFinder. One
+extra enclosing `Phylogenetic_Hierarchical_Orthogroups/` export directory is
+recognized if it contains a nested HOG directory; populated HOG directories,
+ambiguous Results directories and explicit node choices are never replaced.
+
+After updating the importer, use a **new output directory**. The existing resume
+fingerprint intentionally rejects results produced by different source code.
+
 ### Single method
 
 ```bash

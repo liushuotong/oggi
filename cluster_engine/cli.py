@@ -38,6 +38,8 @@ def add_parser(sp):
     p.add_argument('--target', choices=['hog', 'locus'], default='hog')
     p.add_argument('--proteomes', help='explicit declaration: directory of COMPLETE proteomes, one per assembly')
     p.add_argument('--orthofinder-results', help='explicit declaration: existing COMPLETE-proteome OrthoFinder Results directory')
+    p.add_argument('--orthofinder-export', action='store_true',
+                   help='with --orthofinder-results: accept an exported HOG set plus labelled species tree without Log.txt; record completion as unverified')
     p.add_argument('--hog-level', default='N0')
     p.add_argument('--tree', help='user-supplied rooted assembly tree; tip names equal assembly_ID')
     p.add_argument('--gene-tree', help='family gene tree in Newick with branch lengths; tips equal protein IDs')
@@ -178,8 +180,8 @@ def input_hashes(args):
     if args.proteomes:
         files.extend(p for p in Path(args.proteomes).iterdir() if p.is_file())
     if args.orthofinder_results:
-        from orthofinder_process import find_results_dir
-        result = Path(find_results_dir(args.orthofinder_results))
+        from .hog_import import resolve_results
+        result = resolve_results(args.orthofinder_results)
         files.extend(p for p in [result/'Log.txt', result/'Phylogenetic_Hierarchical_Orthogroups'/(args.hog_level+'.tsv'),
                                 result/'Species_Tree'/'SpeciesTree_rooted_node_labels.txt'] if p.exists())
     return {str(p.resolve()): digest(p) for p in sorted(set(files))}
@@ -205,6 +207,8 @@ def run(args):
             setattr(args, key, str(Path(getattr(args, key)).resolve()))
     if args.proteomes and args.orthofinder_results:
         raise ValueError('choose new complete-proteome run OR explicitly reused results')
+    if getattr(args, 'orthofinder_export', False) and not args.orthofinder_results:
+        raise ValueError('--orthofinder-export requires --orthofinder-results')
     if args.evaluation_distances and (not args.distance_provenance or args.evaluation_alignment):
         raise ValueError('external distance requires --distance-provenance and cannot combine with alignment')
     config = configure(args)
@@ -375,6 +379,13 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
                     candidates.append(c)
         except Exception as exc:
             record.update(status='failed', reason=type(exc).__name__ + ': ' + str(exc))
+        if method.startswith('orthofinder') and 'orthofinder_source' in manifest:
+            source = manifest['orthofinder_source']
+            for key in ('import_status', 'assigned_gene_count', 'unresolved_gene_count', 'assignment_coverage'):
+                record[key if key == 'import_status' else 'hog_'+key] = source.get(key)
+            if record['status'] == 'success' and source.get('assigned_gene_count') is not None:
+                record['reason'] += '; HOG import %d/%d genes, %d unresolved (%s)' % (
+                    source['assigned_gene_count'], source['input_gene_count'], source['unresolved_gene_count'], source['import_status'])
         record['runtime_seconds'] = time.monotonic()-started
         statuses.append(record)
         manifest['candidate_status'] = statuses

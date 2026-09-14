@@ -92,7 +92,8 @@ def hogs(context):
 
 
 def _hogs(context):
-    from orthofinder_process import find_results_dir, parse_hogs
+    from orthofinder_process import parse_hogs
+    from .hog_import import resolve_results, node_scope, import_targets
     args, runner = context['args'], context['runner']
     cached = context.get('cached_hog_source')
     if cached and not args.orthofinder_results:
@@ -101,10 +102,7 @@ def _hogs(context):
                 raise ValueError('cached full-proteome HOG source changed; use a new output directory')
         results = Path(cached['directory'])
     elif args.orthofinder_results:
-        results = Path(find_results_dir(args.orthofinder_results))
-        log = results / 'Log.txt'
-        if not log.exists() or 'run completed' not in log.read_text().lower():
-            raise ValueError('existing run needs Log.txt documenting completed full analysis')
+        results = resolve_results(args.orthofinder_results)
     else:
         directory = Path(args.proteomes)
         files = sorted(p for p in directory.iterdir() if p.suffix.lower() in ('.pep', '.fa', '.faa', '.fasta', '.fas'))
@@ -133,24 +131,42 @@ def _hogs(context):
         if args.tree:
             cmd += ['-s', args.tree]
         runner.run(cmd, work)
-        results = Path(find_results_dir(str(work / 'run')))
-    table = parse_hogs(str(results), args.hog_level)
-    groups = defaultdict(list)
-    for r in table.to_dict('records'):
-        g = r['gene_ID']
-        if g in context['seqs'] and r['assembly_ID'] == context['assemblies'][g]:
-            groups[r['ogg_cluster']].append(g)
-    assigned = {g for group in groups.values() for g in group}
-    unsupported = sorted(set(context['seqs']) - assigned)
-    # Unassigned/outside-node targets are retained but explicitly unresolved.
-    all_groups = list(groups.values()) + [[g] for g in unsupported]
-    partition(all_groups, context['seqs'])
-    context['manifest']['orthofinder_source'] = {
+        results = resolve_results(str(work / 'run'))
+    source = {
         'directory': str(results), 'level': args.hog_level,
         'complete_proteomes': 'explicit user declaration; completeness not inferred',
-        'reused': bool(args.orthofinder_results or cached), 'unresolved_targets': unsupported,
+        'reused': bool(args.orthofinder_results or cached), 'import_status': 'failed',
         'hashes': {str(p): digest(p) for p in [results/'Log.txt',
-                    results/'Phylogenetic_Hierarchical_Orthogroups'/(args.hog_level+'.tsv')]}}
+                    results/'Phylogenetic_Hierarchical_Orthogroups'/(args.hog_level+'.tsv'),
+                    results/'Species_Tree'/'SpeciesTree_rooted_node_labels.txt'] if p.is_file()}}
+    context['manifest']['orthofinder_source'] = source
+    try:
+        log = results/'Log.txt'
+        exported = bool(getattr(args, 'orthofinder_export', False))
+        if log.exists():
+            if 'run completed' not in log.read_text(encoding='utf-8-sig', errors='replace').lower():
+                raise ValueError('OrthoFinder Log.txt does not document completed full analysis')
+            source['completion_evidence'] = 'Log.txt documents run completed'
+        elif exported and args.orthofinder_results:
+            source['completion_evidence'] = 'exported HOGs; run completion not independently verified (Log.txt absent)'
+        else:
+            raise ValueError('existing run needs Log.txt documenting completed full analysis; '
+                             'for a downloaded HOG + labelled species-tree export, explicitly add --orthofinder-export')
+        table = parse_hogs(str(results), args.hog_level, detailed=True)
+        scope = node_scope(results, args.hog_level, table, required=exported)
+        source['node_scope'] = scope
+        all_groups, unsupported, details = import_targets(table, context['assemblies'], scope)
+        source.update(details)
+        if not source['assigned_gene_count']:
+            raise ValueError('zero target genes imported from %s; check gene IDs, assembly mapping and node scope. '
+                             'No all-unresolved singleton candidate will be scored; see orthofinder_import.json' % args.hog_level)
+    except Exception as exc:
+        source.update(import_status='failed', error=str(exc))
+        raise
+    print('OrthoFinder %s: imported %d/%d target genes in %d HOGs; %d unresolved; %d assembly aliases' % (
+        args.hog_level, source['assigned_gene_count'], source['input_gene_count'], source['imported_HOG_count'],
+        source['unresolved_gene_count'], sum(r['rule'] == 'unique_target_gene_membership'
+                                            for r in source['assembly_mapping'])), flush=True)
     return all_groups, unsupported
 
 

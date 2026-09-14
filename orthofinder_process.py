@@ -154,6 +154,16 @@ def parse_hogs(results_dir, level="N0", detailed=False):
         raise ValueError("empty or duplicate HOG identifiers: " + p)
     meta = {"HOG", "Orthogroup", "OG", "Gene Tree Parent Clade"}
     species_cols = [c for c in df.columns if c not in meta]
+    assemblies = []
+    for col in species_cols:
+        assembly = col
+        for suf in _FASTA_SUFFIXES:
+            if assembly.endswith(suf):
+                assembly = assembly[:-len(suf)]
+                break
+        assemblies.append(assembly)
+    if len(set(assemblies)) != len(assemblies):
+        raise ValueError("duplicate assembly columns after FASTA extension normalization: " + p)
     rows = []
     if not species_cols:
         raise ValueError("HOG table has no assembly columns: " + p)
@@ -178,7 +188,10 @@ def parse_hogs(results_dir, level="N0", detailed=False):
     if long.duplicated(["assembly_ID", "gene_ID"]).any():
         raise ValueError("a gene occurs more than once within the same assembly/HOG level: " + p)
     long = long.sort_values(["ogg_cluster", "gene_ID"]).reset_index(drop=True)
-    return long if detailed else long[["gene_ID", "ogg_cluster", "assembly_ID"]]
+    result = long if detailed else long[["gene_ID", "ogg_cluster", "assembly_ID"]]
+    # Preserve empty columns too: an outgroup column may be empty below N0.
+    result.attrs['assembly_columns'] = assemblies
+    return result
 
 
 def parse_orthogroups(results_dir):
