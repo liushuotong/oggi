@@ -6,7 +6,7 @@ OGGI is an integrated command-line pipeline for gene-family identification and
 orthology-aware clustering across large pangenome collections (hundreds of
 assembled genomes). It combines HMM/diamond sequence search, per-assembly
 synteny (collinearity) evidence, and a species-tree penalty inside a
-four-factor MCL clustering framework, and also ships lightweight wrappers for
+weighted MCL clustering framework, and also ships lightweight wrappers for
 CD-HIT, MMseqs2, OrthoFinder, WGDI and MCScanX so that different gene-family
 methods can be run and compared from one entry point.
 
@@ -43,7 +43,7 @@ The environment installs the Python libraries and all external programs:
 | AGAT | `oggi reduce` | longest isoform -> CDS -> peptide + bed |
 | HMMER | `oggi identify` | family-profile search (hmmsearch) |
 | DIAMOND | `identify / subcoli / wgdi / mcscanx` | fast all-vs-all protein search |
-| MCL | `oggi cluster` | graph clustering (4-matrix product) |
+| MCL | `oggi cluster` | symmetric similarity / weighted graph clustering |
 | CD-HIT | `cluster -M cdhit`, `oggi cdhit` | sequence clustering |
 | MMseqs2 | `oggi mmseqs` | clustering / search method wrapper |
 | OrthoFinder | `oggi orthofinder` | phylogenetic orthology method wrapper |
@@ -76,16 +76,13 @@ python oggi.py subcoli \
     --id-table results/MYB.gene_to_assembly.tsv \
     -U 10 -D 10 -o results/MYB
 
-# 4) cluster the family with the 4-matrix MCL (alignment x similarity x
-#    collinearity x tree penalty); the collinearity factor is the real
-#    block file produced by subcoli
+# 4) compare methods on TARGET FAMILY genes only
 python oggi.py cluster \
-    -i results/MYB.window.fa.blastp \
-    --seq results/MYB.window.fa \
-    --gene-map results/MYB.gene_to_assembly.tsv \
+    -i results/MYB/gene_family.fa \
+    --gene-map results/MYB/gene_to_assembly.tsv \
+    --similarity results/MYB.window.fa.blastp \
     --collinear-pairs results/MYB.collinear_pairs.tsv \
-    --tree species_tree.nwk \
-    -M mcl -I 1.5 -o results/MYB.ogs
+    -M auto --target hog -o results/MYB.auto
 ```
 
 Run `python oggi.py -h` (and `python oggi.py <module> -h`) for every option.
@@ -154,27 +151,39 @@ Outputs:
 | `<out>.collinearity.raw.txt` | raw significant collinear blocks in wgdi/MCScanX style (`# Alignment N: score=.. pvalue=.. N=.. asm_a&asm_b plus/minus` headers + `geneA locA geneB locB` rows); one block per tested pair that lies in a block, deduplicated by anchor-gene set. Also readable by `parse_collinearity_pairs()` (e.g. as the cluster `--collinear-pairs` block file). |
 | `<out>.collinear_pairs.tsv` | deduplicated anchor gene pairs of all significant blocks (the real collinearity evidence for clustering) |
 
-### `oggi cluster`  - ?clustering
+### `oggi cluster` — unified clustering and auto comparison
 
-* `-M cdhit`: CD-HIT wrapper + `.clstr` parser
-  (`<out>.clstr`, `<out>.clstr.tsv` with `gene_ID/ogg_cluster/assembly_ID`).
-* `-M mcl` (full pipeline, requires `--seq` + `--gene-map`): builds the
-  element-wise product of four gene x gene matrices (all in [0,1]),
+See [CLUSTER_AUTO.md](CLUSTER_AUTO.md) for all six command examples, schemas,
+score semantics, budgets, migration notes, and limitations. Configuration example:
+[cluster_auto.example.json](cluster_auto.example.json).
 
-  ```
-  M = alignment * similarity * collinearity * assembly
-  ```
+Methods: `orthofinder`, `mmseqs`, `cdhit`, `orthofinder-mmseqs`,
+`orthofinder-cdhit`, `weighted-mcl`, `similarity-mcl`, `auto`.
+The input is always a **target-family FASTA plus an explicit assembly map**.
+Full-proteome OrthoFinder is opt-in via `--proteomes` or
+`--orthofinder-results`; a family FASTA is never used as a whole proteome.
 
-  and runs `mcl --abc`:
+Legacy `-M mcl` maps to `weighted-mcl` when tree/synteny/constraints are supplied,
+otherwise `similarity-mcl`. `-i hits --seq family.fa --gene-map map.tsv` remains
+accepted for this alias. **Use target family sequences, not window neighbours.**
+The old ABC-only fallback and guessed assembly names are rejected; for standalone
+ABC work use `mcl edges.abc --abc -I 1.5 -o clusters.txt` directly.
+`-I`, `-c`, `-t`, `--tree`, `--collinear-pairs` remain accepted. `-o` now names a
+report directory; the unified table is `selected_clusters.tsv` with columns
+`gene_ID`, `assembly_ID`, `cluster_ID`. Legacy standalone tool wrappers retain
+their own interfaces and are not the auto comparison engine.
 
-  | factor | source |
-  |---|---|
-  | alignment / similarity | diamond outfmt6 (pident/coverage) |
-  | collinearity | `--collinear-pairs` (real block file; omit = no prior) |
-  | assembly | `--tree` species tree, close accessions penalized (`assembly_matrix.py`); omit = no penalty |
+The new graph adapter replaces the old asymmetric/double-identity product:
+symmetrized best-HSP identity × minimum bidirectional coverage, inclusive
+coordinates, observed synteny boosts with unknown pairs neutral, and explicit
+self-loops for isolates. `MCL_matrix.py` remains a legacy helper; `cluster` no
+longer calls it. No input-prefix inference is used by the new module.
 
-  Cluster labels are written to `<out>` (one tab-separated cluster per line).
-  Without `--seq/--gene-map`, a plain `mcl --abc` fallback is used.
+Auto runs eligible candidates within configured budgets, records skipped/failed
+methods, validates complete partitions, and uses a task-wide common metric set.
+The score is an **experimental preference score, not accuracy**. R is currently
+NA (no justified perturbation implementation); default rankings are provisional.
+Different HOG levels are never mixed in a comparison.
 
 ---
 
@@ -259,9 +268,9 @@ All wrappers convert their results into shared long tables where possible:
 
 ## Practical notes
 
-* **Scale**: the four dense matrices are suitable for single-family/window
-  analyses (the intended use). Whole-pangenome clustering should run the
-  external wrappers (OrthoFinder/MMseqs2/CD-HIT) or use a sparse variant.
+* **Scale**: cluster adapters use target-family graphs. The common Q distance
+  matrix is bounded by `max_distance_genes` (default 2000); above this limit Q
+  is NA for every candidate. Whole-proteome inference uses OrthoFinder separately.
 * **e-value semantics**: window all-vs-all searches use a restricted database;
   prefer bitscore thresholds for filtering, or pass a fixed
   `--dbsize`/`--max-target-seqs` so e-values stay comparable across runs.
@@ -277,6 +286,7 @@ All wrappers convert their results into shared long tables where possible:
 
 ```
 oggi.py                     entry point (pipeline + tool pass-through)
+cluster_engine/             adapters, scheduler, evidence, scoring, reporting
 environment.yml             conda environment
 gene_family_identification.py   HMM+diamond identification core
 sub_collinearity_pre_process.py per-assembly windows + window all-vs-all
