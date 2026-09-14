@@ -1,10 +1,11 @@
 import html
+import textwrap
 from collections import Counter
 from pathlib import Path
 from .data import json_write, tsv, cluster_rows
 
 
-def chart(path, title, panels):
+def chart(path, title, panels, missing_reasons=None):
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="1050" height="360" viewBox="0 0 1050 360">',
              '<rect width="1050" height="360" fill="white"/>',
              '<text x="20" y="28" font-family="sans-serif" font-size="18">%s</text>' % html.escape(title)]
@@ -13,6 +14,10 @@ def chart(path, title, panels):
         parts.append('<text x="%d" y="62" font-family="sans-serif" font-size="14">%s</text>' % (x, html.escape(name)))
         if not values:
             parts.append('<text x="%d" y="120" font-family="sans-serif">NA / not evaluable</text>' % x)
+            reason = (missing_reasons or {}).get(index, 'No evaluable observations')
+            for line, text in enumerate(textwrap.wrap(reason, width=40)):
+                parts.append('<text x="%d" y="%d" font-family="sans-serif" font-size="12">%s</text>'
+                             % (x, 146+line*16, html.escape(text)))
             continue
         lo, hi = min(values), max(values)
         bins = [0]*10
@@ -90,14 +95,22 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
         for label, members in groups.items():
             vals = [1-float(distance[indices[a], indices[b]]) for i, a in enumerate(members) for b in members[:i]] if distance is not None else []
             stats.append({'cluster_ID': label, 'size': len(members),
-                          'mean_similarity': sum(vals)/len(vals) if vals else None})
+                          'mean_similarity': sum(vals)/len(vals) if vals else None,
+                          'similarity_status': 'evaluable' if vals else 'not_evaluable',
+                          'similarity_reason': 'singleton: no within-cluster pair' if len(members)==1 else
+                              (manifest.get('distance', {}).get('reason') or 'shared evaluation distance unavailable')
+                              if distance is None else ''})
         directory = out/'candidates'/c['id']
-        tsv(directory/'cluster_statistics.tsv', stats, ['cluster_ID', 'size', 'mean_similarity'])
+        tsv(directory/'cluster_statistics.tsv', stats, ['cluster_ID', 'size', 'mean_similarity', 'similarity_status', 'similarity_reason'])
         tsv(directory/'silhouette.tsv', [dict(gene_ID=g, silhouette=silhouettes[c['id']].get(g)) for g in genes], ['gene_ID', 'silhouette'])
         chart(directory/'diagnostics.svg', c['id'], [
             ('OGG size (one observation per cluster)', [s['size'] for s in stats]),
             ('Within-cluster 1-distance; singleton=NA', [s['mean_similarity'] for s in stats if s['mean_similarity'] is not None]),
-            ('Silhouette (equal gene weights)', list(silhouettes[c['id']].values()))])
+            ('Silhouette (equal gene weights)', list(silhouettes[c['id']].values()))],
+              missing_reasons={1: (manifest.get('distance', {}).get('reason') or 'shared evaluation distance unavailable')
+                                  if distance is None else 'All clusters are singletons; no within-cluster pairs',
+                               2: (manifest.get('distance', {}).get('reason') or 'shared evaluation distance unavailable')
+                                  if distance is None else 'Silhouette undefined for one group or all singletons'})
     tsv(out/'unsupported_genes.tsv', unsupported, ['candidate', 'gene_ID', 'assembly_ID', 'reason'])
     tsv(out/'method_status.tsv', statuses, ['id', 'method', 'parameters', 'status', 'reason', 'runtime_seconds', 'cache'])
     json_write(out/'selection.json', selection)

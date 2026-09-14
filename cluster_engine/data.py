@@ -25,14 +25,32 @@ def tsv(path, rows, fields):
         w = csv.DictWriter(f, fields, delimiter='\t', extrasaction='ignore')
         w.writeheader()
         for row in rows:
+            for k in set(fields) & {'gene_ID', 'assembly_ID', 'cluster_ID', 'gene_a', 'gene_b'}:
+                if row.get(k) is None or row[k] == '':
+                    raise ValueError('missing identifier in TSV column: ' + k)
             w.writerow({k: 'NA' if row.get(k) is None else
                         json.dumps(row[k], sort_keys=True) if isinstance(row.get(k), (dict, list))
                         else row.get(k, '') for k in fields})
 
 
-def read_tsv(path):
+def read_tsv(path, numeric_fields=()):
+    """Keep IDs/text literal; convert ONLY explicitly declared numeric columns.
+
+    In numeric columns, NA denotes None. No pandas-style inference is applied
+    to identifier columns: an ID equal to NA or 0001 remains a string.
+    """
     with open(path, encoding='utf-8-sig', newline='') as f:
-        return list(csv.DictReader(f, delimiter='\t'))
+        reader = csv.DictReader(f, delimiter='\t')
+        if not set(numeric_fields) <= set(reader.fieldnames or []):
+            raise ValueError('requested numeric column absent from TSV header')
+        rows = list(reader)
+    for row in rows:
+        for field in numeric_fields:
+            value = row[field]
+            row[field] = None if value == 'NA' else float(value)
+            if row[field] is not None and not math.isfinite(row[field]):
+                raise ValueError('nonfinite numeric TSV value in ' + field)
+    return rows
 
 
 def fasta(path, aligned=False):

@@ -74,12 +74,10 @@ def parse_mmseqs_cluster(cluster_tsv, gene_to_assembly=None,
     if gene_to_assembly is None:
         df["assembly_ID"] = df["gene_ID"].apply(lambda g: g.split("_", 1)[0])
     else:
-        missing = [g for g in df["gene_ID"] if g not in gene_to_assembly]
-        if missing and verbose:
-            print("WARNING: %d genes not found in gene_to_assembly, e.g. %s"
-                  % (len(missing), missing[:5]))
-        df["assembly_ID"] = df["gene_ID"].map(
-            lambda g: gene_to_assembly.get(g, ""))
+        missing = [g for g in df["gene_ID"] if not gene_to_assembly.get(g)]
+        if missing:
+            raise ValueError("missing assembly mapping for cluster genes: %s" % missing[:10])
+        df["assembly_ID"] = df["gene_ID"].map(gene_to_assembly)
 
     return df[["gene_ID", "ogg_cluster", "assembly_ID"]]
 

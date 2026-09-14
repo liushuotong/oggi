@@ -159,7 +159,8 @@ def sequence_groups(method, genes, params, context, work):
                 rep, member = line.rstrip('\n').split('\t')[:2]
                 groups[rep].append(member)
     else:
-        # CD-HIT excludes short sequences: retain them as explicit unresolved singletons.
+        # CD-HIT SequenceDB::Read retains size > option_l, so -l 10 excludes <=10.
+        # See upstream cdhit-common.c++; retain excluded targets as unresolved singletons.
         unsupported = [g for g in genes if len(context['seqs'][g]) <= 10]
         usable = [g for g in genes if g not in unsupported]
         write_fasta(inp, {g: context['seqs'][g] for g in usable})

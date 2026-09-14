@@ -1,0 +1,15 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local IDE settings and generated analysis output (keep tests and fixtures)
+.vscode/
+/results/
+/runs/
+/tmp/
+

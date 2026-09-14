@@ -319,3 +319,19 @@ Please cite OGGI as:
 ## Contact
 
 Issues and feature requests: please open an issue on the GitHub repository.
+# Release verification
+
+Keep `tests/` in GitHub. Python caches and local run directories are excluded by
+`.gitignore`. Before publication, run the strict suite from the repository root:
+
+```bash
+python -m pip install numpy pandas biopython
+python -B tests/run_tests.py
+```
+
+The strict runner rejects failures, zero discovered tests, and any skipped tests.
+Ordinary `unittest discover` reports skips but may still exit successfully.
+The GitHub workflow runs this strict check on Ubuntu with Python 3.11 and 3.12.
+External bioinformatics executables are mocked in adapter tests; passing this
+suite does not establish biological accuracy or performance on 401 assemblies.
+See `CLUSTER_AUTO.md` for missing-value handling and evaluation limits.

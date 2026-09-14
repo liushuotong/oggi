@@ -253,3 +253,29 @@ constraints, synthetic silhouette/ARI, budgets, hash-based resume, and parser
 integration. External adapter tests use mocks when executables are absent.
 Passing these tests is software evidence, not validation on 401 rice genomes,
 independent gene trees, curated loci, or reviewer biological benchmarks.
+# Publication checks and TSV readers
+
+Run `python -B tests/run_tests.py` before publication, with numpy, pandas and
+biopython installed. Unlike ordinary discovery, this entry point rejects skipped
+tests and empty discovery. Keep tests in the repository; do not upload caches.
+
+TSV identifiers are strings: literal `NA` and leading zeros are valid identifiers.
+Identifier fields cannot be empty or `None`. Numeric missing values are written
+as `NA`; interpret this marker only in explicitly numeric columns:
+
+```python
+from cluster_engine.data import read_tsv
+scores = read_tsv('scores.tsv', numeric_fields=['B', 'R', 'A', 'Q', 'total_score'])
+# Alternatively start with pandas.read_csv(path, sep='\t', dtype=str,
+#                                         keep_default_na=False)
+# and convert only known numeric columns, mapping their 'NA' values to missing.
+```
+
+Candidate `cluster_statistics.tsv` includes `similarity_status` and
+`similarity_reason`. Missing shared distances and singleton clusters have NA
+similarity, not 100 percent. Diagnostic SVG panels explain unavailable metrics.
+
+Legacy standalone MMseqs/CD-HIT parsers now reject incomplete explicitly supplied
+assembly maps, including empty dictionaries. For backward compatibility only,
+their no-map interface retains prefix inference. The unified cluster interface
+continues to require an explicit complete map.

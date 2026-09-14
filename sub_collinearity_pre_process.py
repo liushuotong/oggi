@@ -51,15 +51,14 @@ def calculate_average_dbsize(seq_path):
     return total / n
 
 def sub_collinearity_blastp(seq_file, dbsize, evalue = 1e-5, max_target_seqs = 20):
-
-    cmd_mkdb = f"diamond makedb --in {seq_file} --db {seq_file}.dmnd"
-    subprocess.run(cmd_mkdb, shell=True, check=True)
-
-    cmd_blastp = f"diamond blastp --query {seq_file} --db {seq_file}.dmnd \
-            --outfmt 6 --evalue {evalue} --max-target-seqs {max_target_seqs} \
-            --dbsize {dbsize} --out {seq_file}.blastp"
-
-    subprocess.run(cmd_blastp, shell=True, check=True)
+    """Legacy helper; max_target_seqs is forwarded (0 means unlimited hits)."""
+    if isinstance(max_target_seqs, bool) or not isinstance(max_target_seqs, int) or max_target_seqs < 0:
+        raise ValueError('max_target_seqs must be a nonnegative integer')
+    seq_file = str(seq_file)
+    subprocess.run(['diamond', 'makedb', '--in', seq_file, '--db', seq_file+'.dmnd'], check=True)
+    subprocess.run(['diamond', 'blastp', '--query', seq_file, '--db', seq_file+'.dmnd',
+                    '--outfmt', '6', '--evalue', str(evalue), '--max-target-seqs', str(max_target_seqs),
+                    '--dbsize', str(dbsize), '--out', seq_file+'.blastp'], check=True)
 
 
 def _cleanup_agat_logs():
@@ -123,10 +122,8 @@ def run_sub_collinearity_pre_process(gff_file_path, seq_file_path):
                 gff_path, seq_path, pep_path, bed_path = sub_collinearity_gff_process(gff, seq)
 
 def use_gene_family_id(gene_to_assembly):
-    # pass gene family identification step
-    sorted_id = set()
-    for i in range(len(gene_to_assembly)):
-        sorted_id += gene_to_assembly[i][0]
+    # Compatibility helper: preserve the supplied mapping/table and return IDs.
+    sorted_id = set(gene_to_assembly) if isinstance(gene_to_assembly, dict) else {row[0] for row in gene_to_assembly}
     return gene_to_assembly, sorted_id
 
 def get_gene_family_id(identification_result, assembly_file_dict, hmm_dict, ref_seq_dict,
