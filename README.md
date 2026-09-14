@@ -12,6 +12,7 @@ methods can be run and compared from one entry point.
 
 ```
 reduce -> identify -> subcoli -> cluster        (OGGI pipeline)
+species-tree: BUSCO -> MAFFT -> concatenate -> IQ-TREE
 cdhit | mmseqs | orthofinder | wgdi | mcscanx   (method wrappers)
 ```
 
@@ -33,7 +34,8 @@ conda activate oggi
 # verify
 python -c "import pandas, numpy, scipy, Bio"
 which diamond hmmsearch cd-hit mcl mmseqs orthofinder wgdi MCScanX \
-     agat_sp_keep_longest_isoform.pl
+     agat_sp_keep_longest_isoform.pl busco mafft trimal
+busco --version
 ```
 
 The environment installs the Python libraries and all external programs:
@@ -49,6 +51,13 @@ The environment installs the Python libraries and all external programs:
 | OrthoFinder | `oggi orthofinder` | phylogenetic orthology method wrapper |
 | WGDI | `oggi wgdi` | -icl collinearity method wrapper |
 | MCScanX | `oggi mcscanx` | collinearity method wrapper |
+| BUSCO | Upstream input for `oggi species-tree` | completeness assessment and single-copy marker extraction |
+| MAFFT / trimAl / IQ-TREE | `oggi species-tree` | BUSCO protein alignment, optional trimming, partitioned phylogeny |
+
+Update an existing environment with `conda env update -n oggi -f environment.yml`.
+BUSCO is installed from Bioconda through `environment.yml`. To add it alone to
+an existing environment, run `conda install -n oggi -c conda-forge -c bioconda busco`.
+See the [BUSCO installation guide](https://busco.ezlab.org/busco_userguide).
 
 If the solver fails, try `conda config --set channel_priority flexible`, or pin
 `python=3.10`. To use the pip version of wgdi (identical to the bundled
@@ -91,6 +100,25 @@ Run `python oggi.py -h` (and `python oggi.py <module> -h`) for every option.
 ---
 
 ## Pipeline modules
+
+### `oggi species-tree` — BUSCO single-copy species/assembly tree
+
+Read each assembly's existing `run_<lineage>/busco_sequences/single_copy_busco_sequences/*.faa`,
+select the shared single-copy BUSCOs, align each locus with MAFFT, concatenate by
+assembly ID, and run a partitioned amino-acid IQ-TREE 2/3 analysis. The default
+requires single-copy presence in every assembly; `--min-occupancy` allows gaps
+for missing loci. Optional trimming uses `--trim automated1`.
+
+```bash
+python oggi.py species-tree \
+  --busco-dir /path/to/phylo/busco --lineage viridiplantae_odb12.2 \
+  --threads 32 --jobs 8 -o results/species_tree
+```
+
+The final Newick is `results/species_tree/05_iqtree/species_tree.treefile`.
+Use it as `cluster --tree` with matching assembly IDs. See
+[SPECIES_TREE.md](SPECIES_TREE.md) for the input layout, manifest-based ID mapping,
+stage controls, complete output list, and Ubuntu commands.
 
 ### `oggi reduce`  - ?per-assembly preprocessing
 
@@ -321,6 +349,7 @@ collinearity_matrix.py          real block file -> collinearity mask matrix
 BLASTP_process.py               outfmt6 -> similarity/alignment matrices
 MCL_matrix.py                   four-matrix product + mcl --abc runner
 assembly_matrix.py              species tree -> assembly penalty matrix
+species_tree.py                 BUSCO single-copy proteins -> MAFFT -> IQ-TREE
 cdhit_process.py / mmseqs_process.py / orthofinder_process.py /
 wgdi_all_vs_all.py / mcscan_all_vs_all.py    method wrappers
 ```
@@ -329,7 +358,7 @@ wgdi_all_vs_all.py / mcscan_all_vs_all.py    method wrappers
 
 OGGI itself is released under the MIT License (see `LICENSE`). It *calls*
 external programs (AGAT, DIAMOND, HMMER, MCL, CD-HIT, MMseqs2, OrthoFinder,
-WGDI, MCScanX) as separate executables; each remains under its own license
+WGDI, MCScanX, MAFFT, trimAl, IQ-TREE) as separate executables; each remains under its own license
 (see `environment.yml` for the conda packages). If you redistribute OGGI with
 any of these tools bundled, comply with their respective licenses.
 

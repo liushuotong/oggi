@@ -4,7 +4,8 @@
 # Activate: conda activate oggi
 # Verify:   python -c "import pandas, numpy, Bio" && \
 #           which diamond hmmsearch cd-hit mcl mmseqs orthofinder wgdi MCScanX \
-#                agat_sp_keep_longest_isoform.pl
+#                agat_sp_keep_longest_isoform.pl busco mafft trimal
+#           busco --version
 #
 # Notes:
 #   * Use Linux / WSL (AGAT and MCScanX are Linux-oriented, not Windows);
@@ -38,6 +39,12 @@ dependencies:
   - cd-hit                  # oggi cluster -M cdhit / cdhit_process
   - mmseqs2                 # oggi mmseqs (easy-cluster / easy-search)
   - mcl                     # oggi cluster -M mcl
+
+  # ---- BUSCO protein alignments and species/assembly phylogeny ----
+  - busco                   # generate per-assembly BUSCO completeness and single-copy outputs
+  - mafft                   # oggi species-tree: per-BUSCO protein alignment
+  - trimal                  # oggi species-tree --trim automated1 (optional at runtime)
+  - iqtree>=2               # oggi species-tree: partitioned maximum-likelihood tree
 
   # ---- gene family / collinearity tools ----
   - orthofinder             # oggi orthofinder (v3, bundles diamond/mcl/fastme)
