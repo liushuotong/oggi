@@ -187,19 +187,43 @@ def sequence_groups(method, genes, params, context, work):
 def similarity_edges(context):
     if 'edges' in context:
         return context['edges']
+    if 'similarity_error' in context:
+        raise ValueError(context['similarity_error'])
+    try:
+        return _similarity_edges(context, context['args'].similarity)
+    except ValueError as exc:
+        if not context['args'].similarity or getattr(context['args'], 'method', None) != 'auto':
+            raise
+        context['manifest']['similarity_recovery'] = {
+            'rejected_input': str(context['args'].similarity), 'reason': str(exc),
+            'action': 'fresh target-only MMseqs search; rejected edges discarded'}
+        print('External similarity rejected: %s; rebuilding target-only search' % exc, flush=True)
+        try:
+            if not shutil.which('mmseqs'):
+                raise ValueError('cannot rebuild similarity: mmseqs dependency missing')
+            return _similarity_edges(context, None)
+        except Exception as recovery:
+            context['similarity_error'] = 'similarity recovery failed: ' + str(recovery)
+            raise
+
+
+def _similarity_edges(context, file):
+    if 'edges' in context:
+        return context['edges']
     args = context['args']
-    file = args.similarity
     if not file:
         work = context['work'] / 'search'
-        work.mkdir()
+        work.mkdir(exist_ok=True)
         file = str(work / 'similarity.tsv')
-        context['runner'].run(['mmseqs', 'easy-search', args.input, args.input, file, str(work / 'tmp'),
+        target = str(work / 'target.fa')
+        write_fasta(target, context['seqs'])
+        context['runner'].run(['mmseqs', 'easy-search', target, target, file, str(work / 'tmp'),
             '--alignment-mode', '3', '--threads', str(args.threads), '--format-output',
             'query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits'], work)
     edges = {}
     ignored = 0
     with open(file) as f:
-        for line in f:
+        for line_number, line in enumerate(f, 1):
             if not line.strip() or line.startswith('#'):
                 continue
             fields = line.split()
@@ -215,7 +239,9 @@ def similarity_edges(context):
             q1, q2, s1, s2 = map(int, fields[6:10])
             if not (0 <= identity <= 1 and 1 <= min(q1, q2) <= max(q1, q2) <= len(context['seqs'][a])
                     and 1 <= min(s1, s2) <= max(s1, s2) <= len(context['seqs'][b])):
-                raise ValueError('invalid identity or HSP coordinates')
+                raise ValueError('%s:%d: invalid identity or HSP coordinates: %s length=%d q=%d..%d; %s length=%d s=%d..%d; identity=%s' %
+                    (file, line_number, a, len(context['seqs'][a]), q1, q2,
+                     b, len(context['seqs'][b]), s1, s2, fields[2]))
             coverage = min((abs(q2-q1)+1)/len(context['seqs'][a]),
                            (abs(s2-s1)+1)/len(context['seqs'][b]))
             weight = identity*coverage

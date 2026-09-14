@@ -240,6 +240,28 @@ class ClusterTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'fingerprint changed'):
                 cli.run(args)
 
+    def test_invalid_external_similarity_auto_rebuild_and_cache(self):
+        bad = self.root/'bad.tsv'
+        bad.write_text('a\tb\t95\t21\t0\t0\t1\t21\t1\t20\t1e-10\t100\n')
+        args = self.args(['--similarity', str(bad)])
+        calls = []
+        class FakeRunner:
+            def run(inner, cmd, work):
+                calls.append(cmd)
+                self.assertEqual(data.fasta(cmd[2]), self.seqs)
+                pathlib.Path(cmd[4]).write_text('a\tb\t95\t20\t0\t0\t1\t20\t1\t20\t1e-10\t100\n')
+        context = dict(args=args, seqs=self.seqs, work=self.root, runner=FakeRunner(), manifest={})
+        with patch.object(methods.shutil, 'which', return_value='/mock/mmseqs'):
+            edges = methods.similarity_edges(context)
+            self.assertEqual(methods.similarity_edges(context), edges)
+        self.assertEqual(len(calls), 1)
+        self.assertAlmostEqual(edges['a','b'][0], .95)
+        self.assertIn('length=20 q=1..21', context['manifest']['similarity_recovery']['reason'])
+        context.pop('edges')
+        args.method = 'similarity-mcl'
+        with self.assertRaisesRegex(ValueError, 'invalid identity or HSP coordinates'):
+            methods.similarity_edges(context)
+
     def test_actual_hog_format_import_integration(self):
         # Real Python HOG reader, fixture data; no simulated external process here.
         result = self.root/'Results'

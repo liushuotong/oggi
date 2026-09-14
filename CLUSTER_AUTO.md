@@ -255,6 +255,17 @@ Passing these tests is software evidence, not validation on 401 rice genomes,
 independent gene trees, curated loci, or reviewer biological benchmarks.
 # Publication checks and TSV readers
 
+Auto recovery: if an explicitly supplied BLAST similarity table fails validation,
+auto records the rejection in `manifest.json:similarity_recovery`, discards its
+edges and attempts a fresh target-only MMseqs search. Missing MMseqs or a failed
+rebuild remains an explicit method failure. Single-method runs still reject the
+invalid table. The generated search uses normalized target sequences, and its
+edges are shared by both MCL methods. To avoid stale window hits, omit
+`--similarity` to request a fresh family-only search directly.
+
+`SUMMARY.md` links all successful candidate tables. A header-only selected table
+with ambiguous selection means a tie, not absence of clustering results.
+
 Run `python -B tests/run_tests.py` before publication, with numpy, pandas and
 biopython installed. Unlike ordinary discovery, this entry point rejects skipped
 tests and empty discovery. Keep tests in the repository; do not upload caches.

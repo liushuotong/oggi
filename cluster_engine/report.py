@@ -115,4 +115,14 @@ def reports(out, candidates, scores, silhouettes, genes, assemblies, distance,
     tsv(out/'method_status.tsv', statuses, ['id', 'method', 'parameters', 'status', 'reason', 'runtime_seconds', 'cache'])
     json_write(out/'selection.json', selection)
     json_write(out/'manifest.json', manifest)
+    summary = ['# Cluster run results', '', 'Selection: ' + status,
+               'Successful candidates: %d' % len(candidates), '',
+               'Each successful candidate has a complete target partition:', '']
+    summary += ['- `%s`: `candidates/%s/clusters.tsv`' % (c['id'], c['id']) for c in candidates]
+    if len(tied) > 1:
+        summary += ['', 'No unique winner: selected_clusters.tsv intentionally contains only a header.',
+                    'representative_clusters.tsv is an inspection copy, not a unique best result.']
+    summary += ['', 'Missing evaluation evidence is not a failed clustering run.',
+                'See method_status.tsv for failures/skips and selection.json for scoring limitations.']
+    (out/'SUMMARY.md').write_text('\n'.join(summary)+'\n', encoding='utf-8')
     return selection
