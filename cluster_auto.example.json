@@ -6,6 +6,7 @@
     "cdhit": [{"identity": 0.8, "coverage": 0.8}],
     "similarity-mcl": [{"identity": 0.5, "coverage": 0.8, "inflation": 1.5}, {"identity": 0.5, "coverage": 0.8, "inflation": 2.0}],
     "weighted-mcl": [{"identity": 0.5, "coverage": 0.8, "inflation": 1.5}],
+    "weighted-louvain": [{"identity": 0.5, "coverage": 0.8, "resolution": 1.0}],
     "tree": [{"threshold": 0.1}]
   },
   "max_candidates": 14,

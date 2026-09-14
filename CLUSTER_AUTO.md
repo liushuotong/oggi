@@ -3,7 +3,7 @@
 This is an implemented candidate comparison framework, not a validated orthology
 oracle. It targets ONE curated homologous family at a time. It does not build a
 BUSCO tree, infer reliable duplication events, or manufacture biological labels.
-Install numpy/pandas/scipy/biopython and the desired external tools in the Ubuntu environment.
+Install numpy/pandas/scipy/biopython, `requirements-metrics.txt`, and the desired external tools in the Ubuntu environment.
 Missing primary executables are recorded as skipped. A tool failing during a run
 is recorded as failed; other candidates continue.
 
@@ -42,6 +42,63 @@ Use `-M cdhit` for CD-HIT. `weighted-mcl` requires at least one of tree,
 observed synteny or construction constraints; otherwise it is skipped as an
 exact duplicate of similarity-mcl. For OrthoFinder or a hybrid add one of the
 explicit complete-proteome inputs below. All method names are in `cluster -h`.
+
+### Gephi-style weighted Louvain
+
+`auto` includes `weighted-louvain`. To run it alone, `gephi` is a convenient alias:
+
+```bash
+python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+  -M gephi --similarity family.blastp --collinear-pairs synteny.tsv \
+  --louvain-resolution 1.0 --gene-tree family.treefile -o runs/weighted_louvain
+```
+
+`--similarity` is optional if MMseqs is available to generate the base graph.
+`--collinear-pairs` is optional; the method also uses supplied assembly-tree and
+construction-constraint weights through the exact same construction function as
+weighted-MCL. Without extra evidence it still runs on identity*coverage weights.
+The optional `--gene-tree` provides evaluation distances; it is different from
+the construction `--tree` assembly tree. The auto run, as before, prepares all
+six metrics automatically. Single-method mode retains its existing explicit
+evaluation-input behavior.
+
+This is NetworkX's weighted Louvain, the algorithm family of Gephi's built-in
+Modularity, not Gephi Java itself or an exact reproduction of its partitions.
+No Gephi/Java installation is required. Artificial MCL self-loops are not passed
+to Louvain; isolates remain singleton groups and are marked unresolved. Nodes
+and edges are sorted and the configuration `seed` is fixed (default 20260914).
+Louvain runs in a subprocess through the existing runner, so candidate/global
+execution time limits and command logging apply. A graph with no edges returns
+all singletons, with an undefined construction modularity rather than an error.
+
+`--louvain-resolution` / grid `resolution` uses NetworkX's positive gamma:
+larger values favor smaller communities. The Gephi implementation examined uses
+the reciprocal convention (`Gephi r = 1/gamma`), giving equivalent objectives up
+to positive scaling, not identical heuristic trajectories or outputs. The
+modularity-gain stopping threshold is fixed at 1e-7. To compare parameter sets:
+
+```json
+{"grid": {"weighted-louvain": [
+  {"identity": 0.5, "coverage": 0.8, "resolution": 0.5},
+  {"identity": 0.5, "coverage": 0.8, "resolution": 1.0},
+  {"identity": 0.5, "coverage": 0.8, "resolution": 2.0}
+]}}
+```
+
+Use the canonical `weighted-louvain` name in grid configuration. Candidate IDs
+include resolution; the run fingerprint includes the seed and NetworkX version.
+Each worker directory contains `graph.abc` (no self-loops), `nodes.json` and
+`louvain.json`; `manifest.json` records their locations, graph checksum, library
+version, parameters and construction objective. This construction objective is
+separate from the shared auto evaluation graph and does not enter the auto
+ranking as an extra score. Final partitions and all six metric rows appear in
+the ordinary candidate/report outputs. Louvain communities are not by themselves
+proof of orthology, monophyly or corresponding loci.
+
+References:
+- Blondel et al. (2008): https://doi.org/10.1088/1742-5468/2008/10/P10008
+- NetworkX: https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.community.louvain.louvain_communities.html
+- Gephi: https://github.com/gephi/gephi/blob/master/modules/StatisticsPlugin/src/main/java/org/gephi/statistics/plugin/Modularity.java
 
 ### Only a family FASTA and mapping
 

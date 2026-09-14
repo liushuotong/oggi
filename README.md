@@ -159,7 +159,15 @@ score semantics, budgets, migration notes, and limitations. Configuration exampl
 [cluster_auto.example.json](cluster_auto.example.json).
 
 Methods: `orthofinder`, `mmseqs`, `cdhit`, `orthofinder-mmseqs`,
-`orthofinder-cdhit`, `weighted-mcl`, `similarity-mcl`, `tree`, `auto`.
+`orthofinder-cdhit`, `weighted-mcl`, `similarity-mcl`, `weighted-louvain`, `tree`, `auto`.
+`gephi` is an alias for `weighted-louvain`: Louvain community detection as used
+by Gephi Modularity, implemented with NetworkX (not an exact Gephi port).
+Auto includes this candidate. It shares weighted-MCL's construction weights,
+retains isolates, omits artificial self-loops, and uses a fixed seed. Without
+additional synteny/tree/constraint evidence it uses the base sequence weights.
+`--louvain-resolution` sets NetworkX gamma (default 1; larger favors smaller
+groups); its objective convention is reciprocal to Gephi's resolution.
+See `CLUSTER_AUTO.md` for commands and implementation details.
 The input is always a **target-family FASTA plus an explicit assembly map**.
 Full-proteome OrthoFinder is opt-in via `--proteomes` or
 `--orthofinder-results`; a family FASTA is never used as a whole proteome.

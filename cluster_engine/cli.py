@@ -32,7 +32,7 @@ def add_parser(sp):
     p = sp.add_parser('cluster', help='unified target-family clustering and experimental auto comparison')
     p.add_argument('-i', '--input', required=True, help='target family protein FASTA')
     p.add_argument('-o', '--output', required=True, help='new report directory; --resume to reuse matching run')
-    p.add_argument('-M', '--method', choices=list(METHODS)+['auto', 'mcl'], default='auto',
+    p.add_argument('-M', '--method', choices=list(METHODS)+['auto', 'mcl', 'gephi'], default='auto',
                    help='auto runs available methods and automatically prepares all six metric inputs')
     p.add_argument('--gene-map', required=True, help='gene_ID/assembly_ID TSV (header optional); no ID-prefix inference')
     p.add_argument('--target', choices=['hog', 'locus'], default='hog')
@@ -43,6 +43,8 @@ def add_parser(sp):
     p.add_argument('--gene-tree', help='family gene tree in Newick with branch lengths; tips equal protein IDs')
     p.add_argument('--tree-threshold', type=float, default=.1,
                    help='tree complete-linkage maximum within-cluster path length (default 0.1; branch-length units)')
+    p.add_argument('--louvain-resolution', type=float, default=1.,
+                   help='weighted-louvain/gephi: NetworkX gamma (default 1); larger favors smaller groups; reciprocal of Gephi resolution convention')
     p.add_argument('--ranking-metric', choices=['silhouette', 'dunn'],
                    help='internal validity statistic for auto ranking (default silhouette); both are reported')
     p.add_argument('--collinear-pairs', help='observed synteny pairs / supported legacy block file; construction only')
@@ -108,6 +110,8 @@ def candidates_for(methods, args, config):
             default = {'threshold': args.tree_threshold}
         if method.endswith('mcl'):
             default['inflation'] = args.inflation
+        if method == 'weighted-louvain':
+            default['resolution'] = args.louvain_resolution
         options = config['grid'].get(method, [{}])
         if not isinstance(options, list) or not options:
             raise ValueError('each method grid must be a nonempty list of parameter objects')
@@ -124,6 +128,11 @@ def candidates_for(methods, args, config):
                 raise ValueError('CD-HIT protein identity must be >=0.4')
             if method.endswith('mcl') and (not math.isfinite(params['inflation']) or params['inflation'] <= 1):
                 raise ValueError('MCL inflation must exceed 1')
+            if method == 'weighted-louvain':
+                if not math.isfinite(params['resolution']) or params['resolution'] <= 0:
+                    raise ValueError('Louvain resolution must be finite and positive')
+                if isinstance(config['seed'], bool) or not isinstance(config['seed'], int):
+                    raise ValueError('Louvain seed must be an integer')
             if params not in by_method[method]:
                 by_method[method].append(params)
     # Round robin: one candidate per method before any parameter expansion.
@@ -177,6 +186,9 @@ def input_hashes(args):
 
 
 def run(args):
+    if args.method == 'gephi':
+        args.method = 'weighted-louvain'
+        print('gephi alias: weighted-louvain (NetworkX implementation; not an exact Gephi reproduction)', flush=True)
     for key in ('evaluation_features', 'evaluation_graph'):
         if getattr(args, key, None):
             setattr(args, key, str(Path(getattr(args, key)).resolve()))
@@ -250,6 +262,7 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
     (out/'candidates').mkdir(exist_ok=True)
     manifest = dict(identity, fingerprint=fingerprint, target=args.target,
                     commands=previous.get('commands', []) if previous else [],
+                    louvain_runs=previous.get('louvain_runs', []) if previous else [],
                     seed=config['seed'], perturbation={'scheme': None, 'runs': 0, 'R': None,
                     'reason': 'no biologically justified perturbation implemented'},
                     categories=CATEGORIES, state='running',

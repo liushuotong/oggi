@@ -5,12 +5,14 @@ import re
 import shutil
 import subprocess
 import time
+import sys
+import json
 from collections import defaultdict
 from pathlib import Path
 from .data import fasta, partition, write_fasta, digest
 
 METHODS = ('orthofinder', 'mmseqs', 'cdhit', 'orthofinder-mmseqs',
-           'orthofinder-cdhit', 'weighted-mcl', 'similarity-mcl', 'tree')
+           'orthofinder-cdhit', 'weighted-mcl', 'similarity-mcl', 'weighted-louvain', 'tree')
 
 
 class Runner:
@@ -59,6 +61,13 @@ def applicable(method, context):
         dependencies.append('cd-hit')
     if method.endswith('mcl'):
         dependencies.append('mcl')
+        if not args.similarity:
+            dependencies.append('mmseqs')
+    if method == 'weighted-louvain':
+        try:
+            from networkx.algorithms.community import louvain_communities
+        except ImportError:
+            return 'missing dependency: networkx; python -m pip install -r requirements-metrics.txt'
         if not args.similarity:
             dependencies.append('mmseqs')
     if method == 'weighted-mcl' and not (args.tree or args.collinear_pairs or
@@ -262,12 +271,13 @@ def _similarity_edges(context, file):
     return edges
 
 
-def graph_groups(method, params, context, work):
+def build_graph_edges(method, params, context):
+    """Shared construction weights BEFORE MCL loops/normalization or Louvain."""
     genes = list(context['seqs'])
     edges = {pair: w for pair, (w, identity, coverage) in similarity_edges(context).items()
              if identity >= params['identity'] and coverage >= params['coverage'] and w > 0}
     factors = ['sequence: identity * minimum bidirectional coverage; symmetric maximum']
-    if method == 'weighted-mcl':
+    if method in ('weighted-mcl', 'weighted-louvain'):
         args = context['args']
         if args.collinear_pairs:
             from collinearity_matrix import parse_collinearity_pairs
@@ -301,6 +311,14 @@ def graph_groups(method, params, context, work):
                 edges[pair] *= (2 if r['relation'] == 'same' else .5) ** min(r['weight'], 4)
         if any(r['role'] == 'construction' for r in context['constraints']):
             factors.append('explicit construction constraints: soft 2^w / 0.5^w; w capped at 4')
+    if any(not math.isfinite(w) or w <= 0 for w in edges.values()):
+        raise ValueError('construction edge weights must be finite and positive')
+    return edges, factors
+
+
+def graph_groups(method, params, context, work):
+    genes = list(context['seqs'])
+    edges, factors = build_graph_edges(method, params, context)
     abc = work / 'graph.abc'
     with abc.open('w') as f:
         for g in genes:
@@ -316,10 +334,38 @@ def graph_groups(method, params, context, work):
     return groups, isolated, factors
 
 
+def louvain_groups(params, context, work):
+    genes = sorted(context['seqs'])
+    edges, factors = build_graph_edges('weighted-louvain', params, context)
+    work = Path(work).resolve()
+    graph = work/'graph.abc'
+    with graph.open('w', encoding='utf-8') as handle:
+        for (a,b), weight in sorted(edges.items()):
+            handle.write('%s\t%s\t%.12g\n' % (a,b,weight))
+    nodes, output = work/'nodes.json', work/'louvain.json'
+    nodes.write_text(json.dumps(genes, ensure_ascii=False), encoding='utf-8')
+    worker = Path(__file__).with_name('louvain_worker.py').resolve()
+    context['runner'].run([sys.executable, str(worker), '--nodes', str(nodes), '--graph', str(graph),
+        '--output', str(output), '--resolution', str(params['resolution']),
+        '--seed', str(context['config']['seed'])], work)
+    result = json.loads(output.read_text(encoding='utf-8'))
+    partition(result['groups'], genes)
+    metadata = dict(result['metadata'], graph_file=str(graph), graph_sha256=digest(graph), nodes_file=str(nodes))
+    context['manifest'].setdefault('louvain_runs', []).append(metadata)
+    isolated = sorted(set(genes)-{g for pair in edges for g in pair})
+    factors += ['Louvain / NetworkX; same algorithm family as Gephi Modularity, not identical implementation',
+                'no artificial self-loops; all target nodes retained; no additional weighting evidence means sequence weights only',
+                'NetworkX resolution=%s; seed=%s; see louvain.json for construction objective (not evaluation score)' %
+                (params['resolution'], context['config']['seed'])]
+    return result['groups'], isolated, factors
+
+
 def execute(method, params, context, work):
     if method == 'tree':
         from .tree import cluster
         groups, unsupported, factors = cluster(params, context)
+    elif method == 'weighted-louvain':
+        groups, unsupported, factors = louvain_groups(params, context, work)
     elif method.startswith('orthofinder'):
         groups, unsupported = hogs(context)
         factors = ['full-proteome HOG at ' + context['args'].hog_level]
