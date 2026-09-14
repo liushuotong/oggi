@@ -3,7 +3,7 @@
 This is an implemented candidate comparison framework, not a validated orthology
 oracle. It targets ONE curated homologous family at a time. It does not build a
 BUSCO tree, infer reliable duplication events, or manufacture biological labels.
-Install numpy/pandas and the desired external tools in the Ubuntu environment.
+Install numpy/pandas/scipy/biopython and the desired external tools in the Ubuntu environment.
 Missing primary executables are recorded as skipped. A tool failing during a run
 is recorded as failed; other candidates continue.
 
@@ -51,9 +51,66 @@ python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
 ```
 
 No OrthoFinder run starts here. MMseqs/CD-HIT and similarity-MCL run if available;
-weighted-MCL needs additional construction evidence. With no evaluation matrix,
-Q is NA. If only one algorithm category succeeds, A is also NA. Results are still
-delivered; no comparable metrics means no justified numerical ranking.
+weighted-MCL needs additional construction evidence. Tree requires --gene-tree.
+With no usable shared distances, scores are NA and status is not_evaluable;
+partitions are still delivered, but no numerical recommendation is made.
+
+### Gene-tree clustering and evaluation (no standard answer required)
+
+`--tree` is the existing assembly/species tree. Supply a FAMILY GENE TREE with
+`--gene-tree`, whose leaves match the first token of protein FASTA IDs exactly.
+Do not strip isoform suffixes or infer IDs from prefixes. No root is needed.
+
+```bash
+# Run inside ~/oggi_v1 after copying the updated cluster_engine directory.
+python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+  -M tree --gene-tree bHLH.nwk --tree-threshold 0.1 -o runs/tree
+
+# All eligible methods, scored on the same fixed gene-tree distances:
+python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+  -M auto --gene-tree bHLH.nwk --tree-threshold 0.1 \
+  --ranking-metric silhouette -o runs/auto_tree_distance
+```
+
+The tree adapter parses one Newick tree using Biopython, validates all non-root
+edges as finite nonnegative branch lengths, and computes each pair's path sum.
+Polytomies, zero edges, comments and quoted leaf labels are supported. Duplicate
+tips, missing lengths, negative edges and no matching target IDs are rejected.
+Internal support labels do not enter distances; the root stem is ignored.
+
+The adapter applies SciPy **complete-linkage hierarchical clustering** to these
+distances, then cuts at `--tree-threshold`: every pair in a resulting cluster has
+distance <= threshold. Input genes are sorted to make tied-distance processing
+reproducible with the recorded software version. The adapter uses no protein
+similarity graph, assembly labels or synteny. It is not the TreeCluster algorithm
+and does not impose strict monophyly, duplication/speciation labels or HOG semantics.
+
+0.1 is a starting parameter in the tree's branch-length units (usually expected
+substitutions/site), not a universal biological boundary or sequence identity.
+Default: one candidate per method. To inspect threshold sensitivity, explicitly
+configure a grid such as:
+
+```json
+{"ranking_metric":"silhouette","grid":{"tree":[
+  {"threshold":0.025},{"threshold":0.05},{"threshold":0.1},
+  {"threshold":0.2},{"threshold":0.4}
+]}}
+```
+
+Config grid overrides the CLI default for that candidate. All evaluated parameters
+are retained in scores.tsv. Report search ranges and candidate counts in the
+paper; giving one method more tuning opportunities can favor its best score.
+
+Tree-missing target genes are kept as unresolved singletons in full cluster
+outputs, not silently lost. Extra tree leaves do not enter clusters or scores.
+A fixed common evaluation set is computed once, before running any method.
+With only --gene-tree this set is target FASTA IDs intersected with tree tips.
+No candidate is allowed to remove its difficult genes from that evaluation set.
+
+An explicitly supplied --evaluation-distances OR --evaluation-alignment takes
+precedence over the gene tree for evaluation. These existing inputs require the
+complete target scope. The tree candidate still clusters from the gene tree.
+Supplying independent evaluation evidence does not alter tree construction.
 
 ### Explicit complete proteomes
 
@@ -154,66 +211,102 @@ must-links or cannot-links. Window neighbour pairs never add output genes.
   The latter modify existing edges only. Enabled factors are in candidate
   result.json. Tree-distance weighting does not resolve duplications.
 
-## Score and selection
+## Internal validity score and selection
 
-The experimental default is `100 * B^0.60 * R^0.15 * A^0.10 * Q^0.15`.
-No epsilon is added; true zeros remain zeros and NA is not zero.
+No reference grouping or standard answer is required. The old B/R/A/Q geometric
+score is **not used** by auto. Legacy weights are accepted with a notice and
+ignored for ranking. Optional constraints are construction inputs or separate
+boundary diagnostics, never a substitute for missing internal quality metrics.
+Pairwise ARI is retained as a comparison diagnostic, not part of the score.
 
-- B: separately for same/different, compute weighted satisfaction within each
-  independent block, then equal-weight mean over blocks. T+ and T- are combined
-  as `2*T+*T-/(T++T-)` (both zero => zero). Missing either sign => NA.
-  This is not precision/recall F1. An all-merged or all-singleton partition
-  receives B=0 when both signs exist.
-- R: NA in this release. No justified perturbation scheme is implemented;
-  manifest records scheme=null, runs=0 and seed. Parameter sensitivity is
-  separately reported as ARI and is not R. Tools may vary under parallel
-  execution; the recorded seed is not falsely advertised as controlling them.
-- A: ARI on exactly the same target genes; raw values retained, negative values
-  clipped only for score mapping. Categories are phylogenetic (HOG and hybrids),
-  sequence-greedy (MMseqs/CD-HIT), graph-MCL (both MCL variants). Exclude the
-  candidate's own category, average parameter candidates within each other
-  method, then methods within categories, then categories equally. Multiple
-  parameters do not get extra category votes. A sole category gives NA.
-- Q: a shared unweighted distance for ALL candidates. Trusted-MSA p-distance
-  excludes gaps and ambiguous residues pairwise and requires paired canonical
-  residues to cover >=80% of BOTH original sequences. If any pair is unreliable
-  or missing, Q is NA for everyone (conservative complete-matrix policy).
-  Per-gene silhouette is averaged with equal gene weights; singleton silhouette
-  is 0; `Q=(mean+1)/2` keeps negative means meaningful. A single group or all
-  singleton groups is not evaluable. No search graph is reused as a Q matrix.
+All candidates are evaluated with exactly the same fixed gene IDs and distance
+matrix. Two established distance-based indices are reported:
 
-Coverage is reported outside the score: exact input retention, genes touched by
-positive/negative evaluation, independent block counts, silhouette evaluable
-fraction and unresolved fraction. The defaults require >=2 blocks of EACH sign,
->=10% gene coverage of each sign, and no unresolved assignments for adequate
-evidence. These are configurable experimental thresholds, not power calculations.
+- **Silhouette (default ranking)**: for each nonsingleton gene,
+  `s(i)=(b(i)-a(i))/max(a(i),b(i))`, where a is mean distance to the other genes
+  in its cluster and b is the smallest mean distance to another cluster.
+  Each evaluation gene receives equal weight. Singletons contribute 0; a=b=0
+  also contributes 0. Raw mean s is in [-1,1].
+- **Dunn (complementary diagnostic)**: minimum distance between genes in
+  different clusters divided by the largest within-cluster diameter. Larger
+  is better. It is sensitive to an extreme pair, so it is secondary by default.
+  It requires no Euclidean centroid. The bounded form is
+  `separation/(separation+diameter)=D/(1+D)`.
+  Zero diameter with positive separation is unbounded Dunn (raw NA, explicitly
+  flagged, bounded=1). If both are zero, Dunn is undefined (NA).
 
-All candidates use the same effective metrics: any metric absent for any
-candidate is omitted task-wide and remaining weights are normalized once.
-Such rankings are provisional, carry the omitted metrics and are incomparable
-to full scores or other weight configurations. A degenerate candidate may make
-Q unavailable task-wide; this conservative policy is intentional and visible.
-With default R=NA the ranking is always provisional. Formal scoring is tested
-numerically but a full-default formal score cannot be produced in this release.
-Changing a weight to zero explicitly changes the scoring experiment.
+A partition requires `2 <= k <= n-1` on the fixed evaluation set for these
+comparisons. One-cluster and all-singleton candidates are not rankable, with a
+recorded reason. This does not invalidate scores for other candidates.
 
-Ties within `tie_tolerance` (score points) are retained. No block bootstrap or
-ranking-win probability is implemented. Agreement and score are not correctness.
-Inspect `selection.json` before downstream use; it distinguishes selected,
-ambiguous, provisional and failed and retains alternatives.
-When ambiguous, `selected_candidate=null` and `selected_clusters.tsv` has only
-its header; `representative_clusters.tsv` is a deterministic inspection copy,
-not an automatically selected winner. A failed cluster CLI exits with code 2;
-an ambiguous/provisional run exits 0 because it successfully produced a report.
-Downstream pipelines must read the status, not infer scientific success from exit 0.
+The default single auto score is **50*(mean_silhouette+1)** (0..100).
+This is only a linear rescaling: 50 corresponds to s=0 and negative silhouettes
+remain below 50. It is not percent accuracy or statistical confidence.
+Both indices appear in scores.tsv regardless of the ranking choice.
+Use `--ranking-metric dunn` to explicitly rank by **100*D/(1+D)** instead.
+The two indices are not arbitrarily weighted or averaged. Prespecify the ranking
+metric before comparing methods; disagreement between metrics should be reported.
+
+Coverage is kept separate from cluster compactness/separation:
+- evaluation_coverage = genes in the fixed common distance set / input genes;
+- evaluable_gene_fraction = genes with defined silhouette / input genes;
+- assignment_coverage = target genes not flagged unresolved by that adapter /
+  input genes (an adapter diagnostic, not verified accuracy);
+- singleton_gene_fraction is measured on the evaluation set;
+  full_singleton_gene_fraction is also reported for all inputs.
+
+`min_evaluation_coverage` can impose a prespecified application-specific gate
+(default 0: coverage is reported without an invented universal cutoff).
+Below the gate, computed values are still reported but not recommended.
+Missing distances never become maximum distances, zeros, or agreement-only scores.
+
+Identical full partitions have identical scores and are one equivalent result.
+If the highest-scoring candidates have identical full membership, status is
+`equivalent_best` and their common partition is exported. The representative
+candidate name does not establish superiority among equivalent methods.
+If distinct full partitions tie within `tie_tolerance` (default 0.01 on the
+0..100 scale), status is `ambiguous`; all ties are listed and selected_clusters.tsv
+contains only a header. An inspection copy is in representative_clusters.tsv.
+Agreement only on the evaluation subset does not collapse distinct full outputs.
+
+With no usable metric, status is `not_evaluable`, every successful candidate
+partition is retained and no winner is manufactured. An entirely failed/skipped
+run has status `failed` and exits 2. Read selection.json before downstream use;
+exit 0 means a report was generated, not biological validation.
+
+### Interpretation for a paper
+
+These statistics describe **internal quality conditional on the chosen distance,
+gene scope and parameter search**. Scoring on the same tree used by the tree
+candidate measures internal fit and may favor that candidate; it is not an
+independent biological validation. Branch support is not a probability that a
+cluster is correct. A short domain tree can have limited resolving power.
+These scores do not establish orthology, locus correspondence or mechanisms.
+
+Report both raw indices, 0..100 score definition, gene coverage, OGG counts,
+singleton fractions, unresolved assignments, tree/alignment construction and
+threshold search. Scores computed on different gene sets or different distance
+definitions are not directly interchangeable. A higher observed score alone
+does not establish statistical significance. Genes within a family are dependent;
+use replicated families/datasets or justified resampling if testing significance.
+
+References and implementation definitions:
+- Rousseeuw (1987), Silhouettes: a graphical aid to the interpretation and
+  validation of cluster analysis. [DOI](https://doi.org/10.1016/0377-0427(87)90125-7);
+  [standard precomputed-distance interface](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.silhouette_score.html).
+- Dunn (1974), Well-Separated Clusters and Optimal Fuzzy Partitions.
+  [DOI](https://doi.org/10.1080/01969727408546059).
+- [SciPy complete linkage definition](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html).
 
 ## Outputs and safe recovery
 
-- `selected_clusters.tsv`, `scores.tsv`, `selection.json`.
+- `selected_clusters.tsv`, `scores.tsv`, `selection.json`, `method_summary.tsv`.
+- `evaluation_genes.tsv`: fixed inclusion/exclusion list; manifest records exact scope and coverage.
 - `conflicts.tsv`, `unsupported_genes.tsv`, `method_status.tsv`, `manifest.json`.
 - `candidates/<id>/clusters.tsv`, `result.json`, `cluster_statistics.tsv`,
-  `silhouette.tsv`, `diagnostics.svg` (size, mean within-cluster 1-distance,
-  silhouette histograms). Singleton mean similarity is NA, never 100%.
+  `silhouette.tsv`, `diagnostics.svg` (size, mean within-cluster distance,
+  silhouette histograms). Cluster statistics include evaluated size, coverage,
+  mean distance, diameter and mean silhouette. Singleton pair statistics are NA.
 - `work/<unique attempt>/`: tool outputs and full command logs.
 
 Numeric missing values are serialized as `NA` in TSV and null in JSON; ID columns
@@ -233,7 +326,10 @@ Default grids have one candidate per method; custom grids are visited round-robi
 before expansion. Duplicate parameter sets are deduplicated. Missing evidence or
 dependencies do not spend candidate slots. Budget-skipped candidates are recorded.
 Time budgets limit external commands, not hard resource limits on the Python
-interpreter. The provided example expands only MMseqs and similarity-MCL.
+interpreter. Tree distances and complete linkage require quadratic memory.
+max_distance_genes (default 2000) prevents an unbounded matrix allocation; when
+exceeded the tree method is skipped and tree-distance scores are unavailable.
+Increase it only with an explicit memory budget; no hidden gene subsampling occurs. The provided example expands only MMseqs and similarity-MCL.
 
 ## Migration from old mcl
 
@@ -248,9 +344,10 @@ only `oggi cluster` provides these validation and comparison guarantees.
 ## Validation limits
 
 The suite exercises exact membership, skip rules, within-HOG subdivision,
-failure isolation, common scoring scope, geometric zero/NA behavior, contradictory
-constraints, synthetic silhouette/ARI, budgets, hash-based resume, and parser
-integration. External adapter tests use mocks when executables are absent.
+failure isolation, fixed evaluation scope, contradictory constraints, Newick
+parsing, reroot-invariant distances, complete-linkage cuts, exact silhouette/Dunn
+values, identical-partition scores, degeneracies, coverage, budgets and safe resume.
+Legacy geometric-score helpers are tested for compatibility but are not used by auto. External adapter tests use mocks when executables are absent.
 Passing these tests is software evidence, not validation on 401 rice genomes,
 independent gene trees, curated loci, or reviewer biological benchmarks.
 # Publication checks and TSV readers
@@ -266,7 +363,7 @@ edges are shared by both MCL methods. To avoid stale window hits, omit
 `SUMMARY.md` links all successful candidate tables. A header-only selected table
 with ambiguous selection means a tie, not absence of clustering results.
 
-Run `python -B tests/run_tests.py` before publication, with numpy, pandas and
+Run `python -B tests/run_tests.py` before publication, with numpy, pandas, scipy and
 biopython installed. Unlike ordinary discovery, this entry point rejects skipped
 tests and empty discovery. Keep tests in the repository; do not upload caches.
 
@@ -276,15 +373,16 @@ as `NA`; interpret this marker only in explicitly numeric columns:
 
 ```python
 from cluster_engine.data import read_tsv
-scores = read_tsv('scores.tsv', numeric_fields=['B', 'R', 'A', 'Q', 'total_score'])
+scores = read_tsv('scores.tsv', numeric_fields=['silhouette_mean', 'dunn_index', 'total_score'])
 # Alternatively start with pandas.read_csv(path, sep='\t', dtype=str,
 #                                         keep_default_na=False)
 # and convert only known numeric columns, mapping their 'NA' values to missing.
 ```
 
-Candidate `cluster_statistics.tsv` includes `similarity_status` and
-`similarity_reason`. Missing shared distances and singleton clusters have NA
-similarity, not 100 percent. Diagnostic SVG panels explain unavailable metrics.
+Candidate `cluster_statistics.tsv` includes `distance_status` and
+`distance_reason`. Missing pair distances and singleton diameters are NA.
+Patristic distance may exceed 1 and is never converted to a false sequence
+similarity by subtracting it from 1. Diagnostic SVG panels explain missing metrics.
 
 Legacy standalone MMseqs/CD-HIT parsers now reject incomplete explicitly supplied
 assembly maps, including empty dictionaries. For backward compatibility only,

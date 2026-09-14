@@ -1,10 +1,12 @@
 {
-  "weights": {"B": 0.60, "R": 0.15, "A": 0.10, "Q": 0.15},
+  "ranking_metric": "silhouette",
+  "min_evaluation_coverage": 0.0,
   "grid": {
     "mmseqs": [{"identity": 0.8, "coverage": 0.8}, {"identity": 0.9, "coverage": 0.8}],
     "cdhit": [{"identity": 0.8, "coverage": 0.8}],
     "similarity-mcl": [{"identity": 0.5, "coverage": 0.8, "inflation": 1.5}, {"identity": 0.5, "coverage": 0.8, "inflation": 2.0}],
-    "weighted-mcl": [{"identity": 0.5, "coverage": 0.8, "inflation": 1.5}]
+    "weighted-mcl": [{"identity": 0.5, "coverage": 0.8, "inflation": 1.5}],
+    "tree": [{"threshold": 0.1}]
   },
   "max_candidates": 14,
   "max_seconds": 7200,

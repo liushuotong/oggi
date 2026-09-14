@@ -31,7 +31,7 @@ conda env create -f environment.yml
 conda activate oggi
 
 # verify
-python -c "import pandas, numpy, Bio"
+python -c "import pandas, numpy, scipy, Bio"
 which diamond hmmsearch cd-hit mcl mmseqs orthofinder wgdi MCScanX \
      agat_sp_keep_longest_isoform.pl
 ```
@@ -82,6 +82,7 @@ python oggi.py cluster \
     --gene-map results/MYB/gene_to_assembly.tsv \
     --similarity results/MYB.window.fa.blastp \
     --collinear-pairs results/MYB.collinear_pairs.tsv \
+    --gene-tree results/MYB/family.nwk \
     -M auto --target hog -o results/MYB.auto
 ```
 
@@ -153,12 +154,12 @@ Outputs:
 
 ### `oggi cluster` — unified clustering and auto comparison
 
-See [CLUSTER_AUTO.md](CLUSTER_AUTO.md) for all six command examples, schemas,
+See [CLUSTER_AUTO.md](CLUSTER_AUTO.md) for command examples, schemas,
 score semantics, budgets, migration notes, and limitations. Configuration example:
 [cluster_auto.example.json](cluster_auto.example.json).
 
 Methods: `orthofinder`, `mmseqs`, `cdhit`, `orthofinder-mmseqs`,
-`orthofinder-cdhit`, `weighted-mcl`, `similarity-mcl`, `auto`.
+`orthofinder-cdhit`, `weighted-mcl`, `similarity-mcl`, `tree`, `auto`.
 The input is always a **target-family FASTA plus an explicit assembly map**.
 Full-proteome OrthoFinder is opt-in via `--proteomes` or
 `--orthofinder-results`; a family FASTA is never used as a whole proteome.
@@ -180,10 +181,19 @@ self-loops for isolates. `MCL_matrix.py` remains a legacy helper; `cluster` no
 longer calls it. No input-prefix inference is used by the new module.
 
 Auto runs eligible candidates within configured budgets, records skipped/failed
-methods, validates complete partitions, and uses a task-wide common metric set.
-The score is an **experimental preference score, not accuracy**. R is currently
-NA (no justified perturbation implementation); default rankings are provisional.
-Different HOG levels are never mixed in a comparison.
+methods, validates complete partitions, and scores on a fixed common gene set
+and distance matrix. No standard answer is required. Both Silhouette and Dunn
+are reported; the default ranking score is `50*(mean_silhouette+1)` on 0..100.
+These are **internal cluster validity scores, not orthology accuracy**. The old
+B/R/A/Q geometric score is no longer used. Without usable distances, clustering
+results are delivered with `not_evaluable` scores and no numerical recommendation.
+
+`-M tree --gene-tree family.nwk --tree-threshold 0.1` clusters using only
+gene-tree path lengths and complete linkage. `--tree` remains the separate
+assembly/species-tree argument. Gene-tree distances also evaluate all candidates
+unless an explicit evaluation alignment/matrix is provided. Scoring on a tree
+used for construction is an internal-fit comparison, not independent validation.
+Tree clusters are not automatically monophyletic clades, orthologs or HOGs.
 
 ---
 

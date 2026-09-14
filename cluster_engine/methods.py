@@ -10,7 +10,7 @@ from pathlib import Path
 from .data import fasta, partition, write_fasta, digest
 
 METHODS = ('orthofinder', 'mmseqs', 'cdhit', 'orthofinder-mmseqs',
-           'orthofinder-cdhit', 'weighted-mcl', 'similarity-mcl')
+           'orthofinder-cdhit', 'weighted-mcl', 'similarity-mcl', 'tree')
 
 
 class Runner:
@@ -41,6 +41,13 @@ class Runner:
 def applicable(method, context):
     args = context['args']
     dependencies = []
+    if method == 'tree':
+        if not args.gene_tree:
+            return 'no --gene-tree supplied (the --tree argument is an assembly/species tree)'
+        if context.get('gene_tree_error'):
+            return context['gene_tree_error']
+        if context.get('gene_tree_data') and context['gene_tree_data'][1] is None:
+            return context['gene_tree_data'][2]['reason']
     if method.startswith('orthofinder'):
         if not args.proteomes and not args.orthofinder_results:
             return 'no explicitly supplied complete proteomes or existing full-proteome OrthoFinder run'
@@ -310,7 +317,10 @@ def graph_groups(method, params, context, work):
 
 
 def execute(method, params, context, work):
-    if method.startswith('orthofinder'):
+    if method == 'tree':
+        from .tree import cluster
+        groups, unsupported, factors = cluster(params, context)
+    elif method.startswith('orthofinder'):
         groups, unsupported = hogs(context)
         factors = ['full-proteome HOG at ' + context['args'].hog_level]
         if method != 'orthofinder':
