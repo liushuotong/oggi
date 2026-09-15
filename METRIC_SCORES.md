@@ -9,7 +9,7 @@ python -m pip install -r requirements-metrics.txt
 ## Auto requires no separate feature or graph files
 
 ```bash
-python oggi.py cluster -M auto -i family.fa --gene-map gene_map.tsv -o runs/family_auto
+oggi cluster -M auto -i family.fa --gene-map gene_map.tsv -o runs/family_auto
 # If available, add --gene-tree family.treefile to use phylogenetic distances.
 ```
 

@@ -14,7 +14,7 @@ is recorded as failed; other candidates continue.
 
 Copy the updated `oggi.py`, the ENTIRE `cluster_engine/` directory, and the updated
 support modules into `~/oggi_v1/` (copying only the old OrthoFinder wrapper is not
-enough). Activate your environment and run tests before the expensive analysis:
+enough). Activate your environment before the analysis:
 
 Include the `orthofinder_hog/` directory and its source/license notices when
 using `hog-tree`; its code is bundled and does not require the original
@@ -23,8 +23,7 @@ using `hog-tree`; its code is bundled and does not require the original
 ```bash
 conda activate oggi
 cd ~/oggi_v1
-python -m unittest discover -s tests -v
-python oggi.py cluster -h
+oggi cluster -h
 ```
 
 In these examples replace `family.fa` and `gene_map.tsv` with the actual target
@@ -37,7 +36,7 @@ are errors. Extra mapped genes are ignored. Protein isoform suffixes are retaine
 ### Importing existing OrthoFinder HOGs
 
 ```bash
-python oggi.py cluster -M auto -i family.fa --gene-map gene_map.tsv \
+oggi cluster -M auto -i family.fa --gene-map gene_map.tsv \
   --orthofinder-results /path/to/Results_Sep14 --hog-level N1 \
   --gene-tree family.nwk --collinear-pairs synteny.tsv -o runs/auto_N1
 ```
@@ -93,10 +92,10 @@ fingerprint intentionally rejects results produced by different source code.
 ### Single method
 
 ```bash
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+oggi cluster -i family.fa --gene-map gene_map.tsv \
   -M mmseqs -c 0.8 --coverage 0.8 -o runs/mmseqs
 
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+oggi cluster -i family.fa --gene-map gene_map.tsv \
   -M similarity-mcl --similarity family.blastp -c 0.5 --coverage 0.8 \
   -I 1.5 -o runs/similarity_mcl
 ```
@@ -111,7 +110,7 @@ explicit complete-proteome inputs below. All method names are in `cluster -h`.
 `auto` includes `weighted-louvain`. To run it alone, `gephi` is a convenient alias:
 
 ```bash
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+oggi cluster -i family.fa --gene-map gene_map.tsv \
   -M gephi --similarity family.blastp --collinear-pairs synteny.tsv \
   --louvain-resolution 1.0 --gene-tree family.treefile -o runs/weighted_louvain
 ```
@@ -166,7 +165,7 @@ References:
 ### Only a family FASTA and mapping
 
 ```bash
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+oggi cluster -i family.fa --gene-map gene_map.tsv \
   -M auto --target hog --config cluster_auto.example.json -o runs/family_auto
 ```
 
@@ -189,11 +188,11 @@ Do not strip isoform suffixes or infer IDs from prefixes. No root is needed.
 
 ```bash
 # Run inside ~/oggi_v1 after copying the updated cluster_engine directory.
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+oggi cluster -i family.fa --gene-map gene_map.tsv \
   -M tree --gene-tree bHLH.nwk --tree-threshold 0.1 -o runs/tree
 
 # All eligible methods, scored on the same fixed gene-tree distances:
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv \
+oggi cluster -i family.fa --gene-map gene_map.tsv \
   -M auto --gene-tree bHLH.nwk --tree-threshold 0.1 \
   --ranking-metric silhouette -o runs/auto_tree_distance
 ```
@@ -241,7 +240,7 @@ Supplying independent evaluation evidence does not alter tree construction.
 ### Explicit complete proteomes
 
 ```bash
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv -M auto \
+oggi cluster -i family.fa --gene-map gene_map.tsv -M auto \
   --proteomes ~/oggi_v1/ath_genome_and_annotation/orthofinder \
   --hog-level N0 --target hog -t 8 -o runs/full_proteomes_auto
 ```
@@ -260,7 +259,7 @@ deliberately for 401 complete proteomes.
 ### Reuse a complete-proteome OrthoFinder run
 
 ```bash
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv -M auto \
+oggi cluster -i family.fa --gene-map gene_map.tsv -M auto \
   --orthofinder-results ~/oggi_v1/ath_genome_and_annotation/orthofinder_ath6_trial_outgroup/Results_Sep14 \
   --hog-level N1 --target hog -o runs/reused_hog_auto
 ```
@@ -320,7 +319,7 @@ https://github.com/soedinglab/MMseqs2/wiki#environment-variables-used-by-mmseqs2
 ### External evaluation constraints and a common trusted alignment
 
 ```bash
-python oggi.py cluster -i family.fa --gene-map gene_map.tsv -M auto \
+oggi cluster -i family.fa --gene-map gene_map.tsv -M auto \
   --target locus --constraints constraints.tsv --constraints-target locus \
   --evaluation-alignment trusted_family_alignment.fa \
   --collinear-pairs construction_pairs.tsv --construction-source discovery_synteny \
@@ -512,16 +511,7 @@ silently selected. Use the mcl executable directly if you intentionally want an
 ABC-only operation. Standalone `oggi mmseqs`/`oggi cdhit` retain their old CLIs;
 only `oggi cluster` provides these validation and comparison guarantees.
 
-## Validation limits
-
-The suite exercises exact membership, skip rules, within-HOG subdivision,
-failure isolation, fixed evaluation scope, contradictory constraints, Newick
-parsing, reroot-invariant distances, complete-linkage cuts, exact silhouette/Dunn
-values, identical-partition scores, degeneracies, coverage, budgets and safe resume.
-Legacy geometric-score helpers are tested for compatibility but are not used by auto. External adapter tests use mocks when executables are absent.
-Passing these tests is software evidence, not validation on 401 rice genomes,
-independent gene trees, curated loci, or reviewer biological benchmarks.
-# Publication checks and TSV readers
+## TSV readers
 
 Auto recovery: if an explicitly supplied BLAST similarity table fails validation,
 auto records the rejection in `manifest.json:similarity_recovery`, discards its
@@ -533,10 +523,6 @@ edges are shared by both MCL methods. To avoid stale window hits, omit
 
 `SUMMARY.md` links all successful candidate tables. A header-only selected table
 with ambiguous selection means a tie, not absence of clustering results.
-
-Run `python -B tests/run_tests.py` before publication, with numpy, pandas, scipy and
-biopython installed. Unlike ordinary discovery, this entry point rejects skipped
-tests and empty discovery. Keep tests in the repository; do not upload caches.
 
 TSV identifiers are strings: literal `NA` and leading zeros are valid identifiers.
 Identifier fields cannot be empty or `None`. Numeric missing values are written

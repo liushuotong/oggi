@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oggi"
+dynamic = ["version"]
+description = "Orthologous-Gene-Group Inference toolkit for plant pangenome analyses"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-2-Clause AND GPL-3.0-or-later"
+license-files = ["LICENSE", "orthofinder_hog/LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [
+  { name = "Shuotong Liu" },
+]
+keywords = ["bioinformatics", "pangenome", "orthology", "gene-family", "synteny"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "numpy",
+  "scipy",
+  "pandas",
+  "biopython",
+  "scikit-learn>=1.4,<2",
+  "networkx>=3,<4",
+  "hdbscan>=0.8.40,<0.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/liushuotong/oggi"
+Repository = "https://github.com/liushuotong/oggi.git"
+Issues = "https://github.com/liushuotong/oggi/issues"
+
+[project.scripts]
+oggi = "oggi:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+  "assembly_matrix",
+  "bed_utils",
+  "BLASTP_process",
+  "busco_process",
+  "cdhit_process",
+  "collinearity_matrix",
+  "collinearity",
+  "gene_family_identification",
+  "MCL_matrix",
+  "mcscan_all_vs_all",
+  "mmseqs_process",
+  "oggi",
+  "orthofinder_process",
+  "species_tree",
+  "sub_collinearity_pre_process",
+  "sub_collinearity",
+  "wgdi_all_vs_all",
+]
+
+[tool.setuptools.packages.find]
+include = ["cluster_engine*", "orthofinder_hog*"]
+
+[tool.setuptools.package-data]
+orthofinder_hog = ["LICENSE", "README.md", "PROVENANCE.json"]
+
+[tool.setuptools.dynamic]
+version = { attr = "oggi.__version__" }

@@ -20,12 +20,12 @@ busco --version
 Use the manifest to preserve assembly IDs used by other OGGI modules:
 
 ```bash
-python oggi.py busco \
+oggi busco \
   --manifest processed/assembly_manifest.tsv \
   --mode proteins --lineage viridiplantae_odb12.2 \
   --threads 32 -o results/busco
 
-python oggi.py species-tree \
+oggi species-tree \
   --manifest results/busco/busco_manifest.tsv \
   --threads 32 --jobs 8 -o results/species_tree
 ```
@@ -37,17 +37,17 @@ requires at least four assemblies.
 
 ```bash
 # Run all protein FASTAs in the directory.
-python oggi.py busco \
+oggi busco \
   -i proteomes/ -m proteins -l viridiplantae_odb12.2 \
   -t 32 -o results/busco_proteins
 
 # Run genome FASTAs instead.
-python oggi.py busco \
+oggi busco \
   -i genomes/ -m genome -l viridiplantae_odb12.2 \
   -t 32 -o results/busco_genomes
 
 # Run a single protein FASTA.
-python oggi.py busco \
+oggi busco \
   -i proteomes/Triticum_monococcum.faa \
   -m proteins -l viridiplantae_odb12.2 \
   -t 16 -o results/busco_one
@@ -89,7 +89,7 @@ All assemblies in a batch use the same explicit versioned lineage, such as
 the versioned dataset name. Unversioned names and `run_` prefixes are rejected.
 
 ```bash
-python oggi.py busco \
+oggi busco \
   -i proteomes/ -l /data/busco_downloads/lineages/viridiplantae_odb12.2 \
   --download-path /data/busco_downloads --offline \
   -t 32 -o results/busco_offline
@@ -167,13 +167,3 @@ be empty after a valid BUSCO run with no single-copy hits; the downstream
 See [SPECIES_TREE.md](SPECIES_TREE.md) for alignment, concatenation, and IQ-TREE
 options, and the [official BUSCO guide](https://busco.ezlab.org/busco_userguide)
 for BUSCO modes, datasets, and command-line arguments.
-
-## Verification
-
-```bash
-python -B -m unittest discover -s tests -p 'test_busco_process.py' -v
-```
-
-Wrapper tests simulate the external BUSCO process and verify arguments, input
-validation, batch failures, and compatibility with the species-tree manifest.
-They do not run a biological analysis or install BUSCO datasets.

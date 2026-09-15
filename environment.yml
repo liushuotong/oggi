@@ -10,7 +10,7 @@
 # Notes:
 #   * Use Linux / WSL (AGAT and MCScanX are Linux-oriented, not Windows);
 #   * If the solver fails: conda config --set channel_priority flexible
-#     and retry, or switch python to 3.10;
+#     and retry;
 #   * agat and orthofinder pull in many dependencies, so the first solve
 #     may take a while.
 

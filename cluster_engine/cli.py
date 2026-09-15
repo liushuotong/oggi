@@ -254,10 +254,23 @@ def run(args):
     if any(out == Path(p) or out in Path(p).parents for p in hashes):
         raise ValueError('output must not contain original input files')
     versions = tool_versions()
-    code_files = list(Path(__file__).parent.glob('*.py')) + list(Path(__file__).parents[1].glob('*.py'))
-    code_files += list((Path(__file__).parents[1] / 'orthofinder_hog').glob('*.py'))
+    project_root = Path(__file__).parents[1]
+    top_level_modules = (
+        'assembly_matrix.py', 'bed_utils.py', 'BLASTP_process.py',
+        'busco_process.py', 'cdhit_process.py', 'collinearity_matrix.py',
+        'collinearity.py', 'gene_family_identification.py', 'MCL_matrix.py',
+        'mcscan_all_vs_all.py', 'mmseqs_process.py', 'oggi.py',
+        'orthofinder_process.py', 'species_tree.py',
+        'sub_collinearity_pre_process.py', 'sub_collinearity.py',
+        'wgdi_all_vs_all.py',
+    )
+    code_files = list(Path(__file__).parent.glob('*.py'))
+    code_files += [project_root / name for name in top_level_modules
+                   if (project_root / name).is_file()]
+    code_files += list((project_root / 'orthofinder_hog').glob('*.py'))
     identity = {'inputs': hashes, 'config': config, 'tools': versions,
-                'code': {str(p.relative_to(Path(__file__).parents[1])): digest(p) for p in code_files},
+                'code': {str(p.relative_to(project_root)): digest(p)
+                         for p in code_files},
                 'args': {k: v for k, v in vars(args).items() if k not in ('func', 'output', 'resume')}}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     manifest_path = out/'manifest.json'

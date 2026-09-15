@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import sys
 
+__version__ = "1.0.0"
+
 PROTEIN_EXTS = (".pep", ".fa", ".fasta", ".faa")
 GFF_EXTS = (".gff", ".gff3")
 
@@ -265,7 +267,8 @@ def main():
                     "BUSCO phylogeny: busco -> species-tree\n"
                     "tool wrappers (own CLI): cdhit | mmseqs | orthofinder | wgdi | mcscanx",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-v", "--version", action="version", version="oggi v1")
+    parser.add_argument("-v", "--version", action="version",
+                        version="oggi " + __version__)
     sp = parser.add_subparsers(dest="module", metavar="<module>")
 
     add_reduce_parser(sp)

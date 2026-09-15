@@ -6,10 +6,13 @@ __pycache__/
 htmlcov/
 .venv/
 venv/
+build/
+dist/
+*.egg-info/
+conda-bld/
 
 # Local IDE settings and generated analysis output (keep tests and fixtures)
 .vscode/
 /results/
 /runs/
 /tmp/
-

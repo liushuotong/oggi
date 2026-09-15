@@ -40,7 +40,7 @@ Replace `OUTGROUP_ASSEMBLY_ID` with an actual species-tree tip and use the
 appropriate family gene-tree path:
 
 ```bash
-python oggi.py cluster \
+oggi cluster \
   -M hog-tree --target hog \
   -i results/MYB/gene_family.fa \
   --gene-map results/MYB/gene_to_assembly.tsv \
@@ -206,13 +206,3 @@ print(result["unsupported"])
 `unsupported` identifies those unresolved targets. The direct function accepts
 an optional `check_budget` callback at stage boundaries; the CLI worker provides
 process-level timeout enforcement.
-
-## Verification
-
-```bash
-python -B -m unittest discover -s tests -p 'test_family_hogs.py' -v
-```
-
-Tests exercise the actual copied algorithm, root and descendant duplications,
-terminal duplications, optional extra splitting, outgroup validation, unrooted
-IQ-TREE/FastTree input formats, explicit gene mapping, and worker/cache behavior.

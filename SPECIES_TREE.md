@@ -8,12 +8,12 @@ tree tip. This module does not rerun BUSCO.
 To generate the BUSCO inputs first, use the [BUSCO running interface](BUSCO.md):
 
 ```bash
-python oggi.py busco \
+oggi busco \
   --manifest processed/assembly_manifest.tsv \
   --mode proteins --lineage viridiplantae_odb12.2 \
   --threads 32 -o results/busco
 
-python oggi.py species-tree \
+oggi species-tree \
   --manifest results/busco/busco_manifest.tsv \
   --threads 32 --jobs 8 -o results/species_tree
 ```
@@ -58,7 +58,7 @@ that directory:
 conda activate oggi
 conda install -c conda-forge -c bioconda busco mafft trimal 'iqtree>=2'
 
-python oggi.py species-tree \
+oggi species-tree \
   --busco-dir "$HOME/phylo/busco" \
   --lineage viridiplantae_odb12.2 \
   -o "$HOME/phylo/busco_species_tree" \
@@ -105,18 +105,18 @@ depend on the sequence order produced by MAFFT.
 
 ```bash
 # Accept genes that are single-copy in at least 90% of assemblies and trim alignments
-python oggi.py species-tree \
+oggi species-tree \
   --busco-dir "$HOME/phylo/busco" --lineage viridiplantae_odb12.2 \
   --min-occupancy 0.9 --trim automated1 \
   --threads 32 --jobs 8 -o "$HOME/phylo/busco_tree_90pct"
 
 # Extract shared single-copy genes only; MAFFT and IQ-TREE are not required
-python oggi.py species-tree \
+oggi species-tree \
   --busco-dir "$HOME/phylo/busco" --lineage viridiplantae_odb12.2 \
   --stop-after extract -o "$HOME/phylo/busco_shared_genes"
 
 # Complete alignment and concatenation without running IQ-TREE
-python oggi.py species-tree \
+oggi species-tree \
   --busco-dir "$HOME/phylo/busco" --lineage viridiplantae_odb12.2 \
   --stop-after concat --threads 32 --jobs 8 -o "$HOME/phylo/busco_concat"
 ```
@@ -157,7 +157,7 @@ assembly	busco_dir
 ```
 
 ```bash
-python oggi.py species-tree \
+oggi species-tree \
   --manifest busco_samples.tsv --lineage viridiplantae_odb12.2 \
   --threads 32 --jobs 8 -o results/species_tree
 ```
@@ -208,16 +208,10 @@ Pass this tree to an existing OGGI clustering command using
 `--tree results/species_tree/05_iqtree/species_tree.treefile`.
 The separate `--gene-tree` option refers to the tree for the target gene family.
 
-## Validation and Official Parameter References
+## Official Parameter References
 
-```bash
-python -B -m unittest discover -s tests -p 'test_species_tree.py' -v
-```
-
-Tests cover extraction across samples, concatenation by label, partition
-coordinates, missing-data padding, input rejection, and workflow checks using
-mock external programs. A real analysis still requires running actual sequences
-in a Linux environment with MAFFT and IQ-TREE installed.
+A real analysis requires running actual sequences in a Linux environment with
+MAFFT and IQ-TREE installed.
 
 - [BUSCO output directories and lineage datasets](https://busco.ezlab.org/busco_userguide)
 - [MAFFT parameters](https://mafft.cbrc.jp/alignment/software/manual/manual.html)

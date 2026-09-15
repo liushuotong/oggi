@@ -24,21 +24,38 @@ cdhit | mmseqs | orthofinder | wgdi | mcscanx   (method wrappers)
 
 ## Installation
 
-Requires **Linux or WSL** (AGAT and MCScanX are not Windows-compatible).
+Requires **Linux or WSL**. The Python package is platform independent, but the
+complete workflow depends on command-line programs distributed through
+Bioconda and is not supported on native Windows.
+
+Build and install the conda package from this checkout:
 
 ```bash
-# create the environment (first solve may take a while)
-conda env create -f environment.yml
-conda activate oggi
+conda create -n oggi-build -c conda-forge conda-build
+conda activate oggi-build
+conda build -c conda-forge -c bioconda conda-recipe
+conda install --use-local oggi
 
-# verify
-python -c "import pandas, numpy, scipy, Bio"
-which diamond hmmsearch cd-hit mcl mmseqs orthofinder wgdi MCScanX \
-     agat_sp_keep_longest_isoform.pl busco mafft trimal
-busco --version
+# the installed command is available in the active environment
+oggi --version
+oggi --help
 ```
 
-The environment installs the Python libraries and all external programs:
+After uploading the built package to a conda channel, users can install it with:
+
+```bash
+conda install -c YOUR_CHANNEL -c conda-forge -c bioconda oggi
+```
+
+For source development, the existing environment file remains available:
+
+```bash
+conda env create -f environment.yml
+conda activate oggi
+python -m pip install --no-deps -e .
+```
+
+The conda recipe installs the Python libraries and all external programs:
 
 | Program | Used by | Purpose |
 |---|---|---|
@@ -54,15 +71,9 @@ The environment installs the Python libraries and all external programs:
 | BUSCO | `oggi busco` | completeness assessment and single-copy marker extraction |
 | MAFFT / trimAl / IQ-TREE | `oggi species-tree` | BUSCO protein alignment, optional trimming, partitioned phylogeny |
 
-Update an existing environment with `conda env update -n oggi -f environment.yml`.
-BUSCO is installed from Bioconda through `environment.yml`. To add it alone to
-an existing environment, run `conda install -n oggi -c conda-forge -c bioconda busco`.
-See the [BUSCO installation guide](https://busco.ezlab.org/busco_userguide).
-
-If the solver fails, try `conda config --set channel_priority flexible`, or pin
-`python=3.10`. To use the pip version of wgdi (identical to the bundled
-`wgdi-master 0.75`), remove the conda `wgdi` line in `environment.yml` and
-uncomment the pip section.
+The package supports Python 3.11 or newer. The first dependency solve can take
+several minutes because BUSCO, OrthoFinder, AGAT and their transitive
+dependencies are installed together.
 
 ---
 
@@ -70,23 +81,23 @@ uncomment the pip section.
 
 ```bash
 # 1) per-assembly preprocessing: longest isoform -> pep + bed
-python oggi.py reduce --gff-dir gff/ --genome-dir genomes/ -o processed/
+oggi reduce --gff-dir gff/ --genome-dir genomes/ -o processed/
 
 # 2) identify members of your gene family (HMM profiles + reference proteins)
-python oggi.py identify \
+oggi identify \
     --manifest processed/assembly_manifest.tsv \
     --hmm PF00004.hmm --ref MYB_ref.fa \
     -o results/MYB
 
 # 3) sub-collinearity: +/-10-gene windows around every member,
 #    window all-vs-all, collinear-block check for known member pairs
-python oggi.py subcoli \
+oggi subcoli \
     --manifest processed/assembly_manifest.tsv \
     --id-table results/MYB.gene_to_assembly.tsv \
     -U 10 -D 10 -o results/MYB
 
 # 4) compare methods on TARGET FAMILY genes only
-python oggi.py cluster \
+oggi cluster \
     -i results/MYB/gene_family.fa \
     --gene-map results/MYB/gene_to_assembly.tsv \
     --similarity results/MYB.window.fa.blastp \
@@ -95,7 +106,7 @@ python oggi.py cluster \
     -M auto --target hog -o results/MYB.auto
 ```
 
-Run `python oggi.py -h` (and `python oggi.py <module> -h`) for every option.
+Run `oggi -h` (and `oggi <module> -h`) for every option.
 
 ---
 
@@ -107,7 +118,7 @@ Infer HOGs from a target family gene tree and an explicitly outgroup-rooted
 species tree using the copied OrthoFinder rooting/reconciliation/HOG algorithms:
 
 ```bash
-python oggi.py cluster -M hog-tree \
+oggi cluster -M hog-tree \
   -i results/MYB/gene_family.fa --gene-map results/MYB/gene_to_assembly.tsv \
   --gene-tree results/MYB/family.treefile \
   --species-tree results/species_tree/05_iqtree/species_tree.treefile \
@@ -128,12 +139,12 @@ explicit versioned lineage, and completed batches export a `species-tree` input
 manifest.
 
 ```bash
-python oggi.py busco \
+oggi busco \
   --manifest processed/assembly_manifest.tsv \
   --mode proteins --lineage viridiplantae_odb12.2 \
   --threads 32 -o results/busco
 
-python oggi.py species-tree \
+oggi species-tree \
   --manifest results/busco/busco_manifest.tsv \
   --threads 32 --jobs 8 -o results/species_tree
 ```
@@ -152,7 +163,7 @@ requires single-copy presence in every assembly; `--min-occupancy` allows gaps
 for missing loci. Optional trimming uses `--trim automated1`.
 
 ```bash
-python oggi.py species-tree \
+oggi species-tree \
   --busco-dir /path/to/phylo/busco --lineage viridiplantae_odb12.2 \
   --threads 32 --jobs 8 -o results/species_tree
 ```
@@ -284,11 +295,11 @@ Tree clusters are not automatically monophyletic clades, orthologs or HOGs.
 ## Method wrappers (own CLIs, passed through by oggi)
 
 ```bash
-python oggi.py cdhit -h          # cdhit_process.py
-python oggi.py mmseqs -h         # mmseqs_process.py  (easy-cluster/linclust/search)
-python oggi.py orthofinder -h    # orthofinder_process.py (N0 HOG parsing)
-python oggi.py wgdi -h           # wgdi_all_vs_all.py (bed -> wgdi -icl)
-python oggi.py mcscanx -h        # MCScanX all-vs-all
+oggi cdhit -h          # cdhit_process.py
+oggi mmseqs -h         # mmseqs_process.py  (easy-cluster/linclust/search)
+oggi orthofinder -h    # orthofinder_process.py (N0 HOG parsing)
+oggi wgdi -h           # wgdi_all_vs_all.py (bed -> wgdi -icl)
+oggi mcscanx -h        # MCScanX all-vs-all
 ```
 
 ### Full OrthoFinder trial on six Arabidopsis proteomes
@@ -372,7 +383,7 @@ All wrappers convert their results into shared long tables where possible:
 * **Parameters to tune per dataset**: `-U/-D` (window size),
   `--pvalue` (0.2 default), MCL `-I` (1.5 default), `-c` identity for cd-hit,
   HMM/diamond e-value cutoffs.
-* **Incremental runs**: `python oggi.py reduce --skip-existing` reuses finished
+* **Incremental runs**: `oggi reduce --skip-existing` reuses finished
   assemblies.
 
 ---
@@ -381,6 +392,8 @@ All wrappers convert their results into shared long tables where possible:
 
 ```
 oggi.py                     entry point (pipeline + tool pass-through)
+pyproject.toml              Python package metadata and `oggi` console script
+conda-recipe/meta.yaml      conda package recipe and complete runtime dependencies
 cluster_engine/             adapters, scheduler, evidence, scoring, reporting
 orthofinder_hog/             copied OrthoFinder/ETE HOG core and GPL source notices
 environment.yml             conda environment
@@ -419,19 +432,3 @@ Please cite OGGI as:
 ## Contact
 
 Issues and feature requests: please open an issue on the GitHub repository.
-# Release verification
-
-Keep `tests/` in GitHub. Python caches and local run directories are excluded by
-`.gitignore`. Before publication, run the strict suite from the repository root:
-
-```bash
-python -m pip install numpy pandas biopython
-python -B tests/run_tests.py
-```
-
-The strict runner rejects failures, zero discovered tests, and any skipped tests.
-Ordinary `unittest discover` reports skips but may still exit successfully.
-The GitHub workflow runs this strict check on Ubuntu with Python 3.11 and 3.12.
-External bioinformatics executables are mocked in adapter tests; passing this
-suite does not establish biological accuracy or performance on 401 assemblies.
-See `CLUSTER_AUTO.md` for missing-value handling and evaluation limits.
