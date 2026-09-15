@@ -1,0 +1,357 @@
+{
+  "source": "User-supplied local OrthoFinder-master snapshot",
+  "upstream_project": "https://github.com/davidemms/OrthoFinder",
+  "copied_on": "2026-09-15",
+  "symbol_hash_encoding": "UTF-8 with LF newlines; includes decorators and function indentation, through end_lineno",
+  "files": [
+    {
+      "upstream_path": "OrthoFinder-master/scripts_of/trees2ologs_of.py",
+      "upstream_sha256": "089bc9d2472a56a5242619ad4d364c655db7fac2324abf9f5b1e8c95e385ed9a",
+      "vendored_path": "core.py",
+      "vendored_sha256": "b10f9ec9a9d7f722d73314a6fbf45881737f2df28b06c6d3308a62003ccc0516",
+      "symbols": [
+        {
+          "name": "GeneToSpecies_dash",
+          "start_line": 36,
+          "end_line": 37,
+          "source_sha256_lf": "eda34536ee998490b86208e2bd5fb2229b9dbe8fcdc9d36c68aff3a8beb67c37",
+          "modified": false
+        },
+        {
+          "name": "GeneToSpecies_secondDash",
+          "start_line": 41,
+          "end_line": 42,
+          "source_sha256_lf": "e14d02f3db9b3416bbed74abd455f980547843d39193e3d584270a069c39e87e",
+          "modified": false
+        },
+        {
+          "name": "GeneToSpecies_3rdDash",
+          "start_line": 44,
+          "end_line": 45,
+          "source_sha256_lf": "0b9b4e95d0910403a64ece28b8fc7b0b4bbc571e0609b938191c434d5acd9247",
+          "modified": false
+        },
+        {
+          "name": "GeneToSpecies_dot",
+          "start_line": 47,
+          "end_line": 48,
+          "source_sha256_lf": "dd932f8394ce16484fd31eb403b29528744a6fda65fcec598c07abc1ec977724",
+          "modified": false
+        },
+        {
+          "name": "GeneToSpecies_hyphen",
+          "start_line": 50,
+          "end_line": 51,
+          "source_sha256_lf": "57a9ce186d8e93b721f2adb7bb64ca1d09eeec60d529e67c4f4cda13beef3297",
+          "modified": false
+        },
+        {
+          "name": "SpeciesAndGene_dash",
+          "start_line": 54,
+          "end_line": 55,
+          "source_sha256_lf": "6aa23a367d95dbebea95dacbbe77960f548eb62f1f341ee9c39292ee3598b187",
+          "modified": false
+        },
+        {
+          "name": "SpeciesAndGene_secondDash",
+          "start_line": 57,
+          "end_line": 59,
+          "source_sha256_lf": "4105c32b25d810a85639c0c5a6a47d431a925f9ec1f8b9afa9bd3f25fdd67c66",
+          "modified": false
+        },
+        {
+          "name": "SpeciesAndGene_3rdDash",
+          "start_line": 61,
+          "end_line": 63,
+          "source_sha256_lf": "762a40a7b9fcac54fec8c3465d87b770db75ffd9ac610d2373a12a4b24f490b7",
+          "modified": false
+        },
+        {
+          "name": "SpeciesAndGene_dot",
+          "start_line": 65,
+          "end_line": 66,
+          "source_sha256_lf": "203c59126402e782af7926ade5bb37e856c36951a66f187907dceca7d348f9b1",
+          "modified": false
+        },
+        {
+          "name": "SpeciesAndGene_hyphen",
+          "start_line": 68,
+          "end_line": 69,
+          "source_sha256_lf": "fe0e4e126d90d10a14cfa763789d2cb00ffdc73f311849002e2c799a2ce310a2",
+          "modified": false
+        },
+        {
+          "name": "RootMap",
+          "start_line": 77,
+          "end_line": 87,
+          "source_sha256_lf": "d5c503d41e7fe2e7a8fc6ff93be7465d98faf540b216c7e3f593ce3b80834d3e",
+          "modified": false
+        },
+        {
+          "name": "StoreSpeciesSets",
+          "start_line": 93,
+          "end_line": 116,
+          "source_sha256_lf": "62328ee0b6a4085b60c5c7efbd8980d8f4c15c7abe51b5abc0e561a7167e1779",
+          "modified": false
+        },
+        {
+          "name": "MRCA_node",
+          "start_line": 123,
+          "end_line": 124,
+          "source_sha256_lf": "1f94b1f7d520c357b0d6263ddc9853e3b3355aa5e87b35f6713ee930e8e94a43",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.__init__",
+          "start_line": 127,
+          "end_line": 156,
+          "source_sha256_lf": "92f024db848cc4644e26d5883563e10944100acd21ede6564dcbe6ac6d3a92ef",
+          "modified": true
+        },
+        {
+          "name": "HogWriter.get_hog_index",
+          "start_line": 158,
+          "end_line": 161,
+          "source_sha256_lf": "2775650235758d8383173b34d8cad4c98628c9d25260774fd85eccad7d8723cb",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.write_hog_genes",
+          "start_line": 163,
+          "end_line": 185,
+          "source_sha256_lf": "6ed26346f0c09c929d1ef4c2abea7d5cf59f4a1fc7587c4b57408c494d2bb7d4",
+          "modified": true
+        },
+        {
+          "name": "HogWriter.write_clade_v2",
+          "start_line": 189,
+          "end_line": 242,
+          "source_sha256_lf": "9b51cd72b144fed3208797d2927e0913c3140618180841085ca8f2d11d109720",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.get_descendant_genes",
+          "start_line": 244,
+          "end_line": 263,
+          "source_sha256_lf": "3ef935cfba4634af99937ae79973780ff65ab53a99ddacb7a7668f83734cadd3",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.get_hog_file_entries",
+          "start_line": 265,
+          "end_line": 301,
+          "source_sha256_lf": "77743845ecabfe4912d12bf919227e78c614fd883a695e7d3becf88cb48929cd",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.close_files",
+          "start_line": 303,
+          "end_line": 305,
+          "source_sha256_lf": "d014412348311d5e5a57312135f4ab8b1d6206d06b4db4a5cf9d2c81434b4434",
+          "modified": true
+        },
+        {
+          "name": "HogWriter.get_skipped_nodes",
+          "start_line": 308,
+          "end_line": 336,
+          "source_sha256_lf": "e13296bc3dd45ca515a73ed925e27aa0c58ce8f57fb590ecaf40a579b0a43d06",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.mark_dups_below",
+          "start_line": 338,
+          "end_line": 376,
+          "source_sha256_lf": "5dea99868ace1ea42816297d4f0a10c4132c9fbd5299a48fdc79ecbe4aa00cd0",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.get_evidenced_dup_level",
+          "start_line": 379,
+          "end_line": 430,
+          "source_sha256_lf": "0e2aad9d06820582f5c7613f3f1c9ee6660af955283ecf5f9fc84aebd0cd0cd8",
+          "modified": false
+        },
+        {
+          "name": "HogWriter.WriteCachedHOGs",
+          "start_line": 432,
+          "end_line": 449,
+          "source_sha256_lf": "c4ae36192910da078310e43faea4d361a95422b98b788d0f74229e3a3c0063d3",
+          "modified": true
+        },
+        {
+          "name": "HogWriter.scl_fn",
+          "start_line": 452,
+          "end_line": 453,
+          "source_sha256_lf": "192a55aae1526fbc7892f6c12d9db2477b23d83827c64a8f2ff32f5a386102a8",
+          "modified": false
+        },
+        {
+          "name": "GetHOGs_from_tree",
+          "start_line": 456,
+          "end_line": 470,
+          "source_sha256_lf": "5f0e912aea02460a39686e94444f4274677adfaeaa4270e487a0e59fc6cb8fc8",
+          "modified": false
+        },
+        {
+          "name": "get_highest_nodes",
+          "start_line": 473,
+          "end_line": 480,
+          "source_sha256_lf": "aa6a2c452e74f50578d17f074d8fedc2863892df971f86fe87889bf8c2696efe",
+          "modified": false
+        },
+        {
+          "name": "get_comparable_nodes",
+          "start_line": 483,
+          "end_line": 504,
+          "source_sha256_lf": "9c497fce561dd8a051c616c21f34c0c77c3936087e8ff9f65b2d22478e68749f",
+          "modified": false
+        },
+        {
+          "name": "OutgroupIngroupSeparationScore",
+          "start_line": 511,
+          "end_line": 516,
+          "source_sha256_lf": "43ab2cc046e310544f39974a34c096e8465e830af47c45f13e3110ba2d2cc588",
+          "modified": false
+        },
+        {
+          "name": "GetRoots",
+          "start_line": 518,
+          "end_line": 606,
+          "source_sha256_lf": "8c8272c40be11054181becd39be6dd7276e69655ffd324b8a0f54700ca990b38",
+          "modified": false
+        },
+        {
+          "name": "OverlapSize",
+          "start_line": 631,
+          "end_line": 634,
+          "source_sha256_lf": "81dedf0768dd9a409c89dc9b678e7eb3185d36a17b67e9353379c349e82e115b",
+          "modified": false
+        },
+        {
+          "name": "ResolveOverlap",
+          "start_line": 636,
+          "end_line": 700,
+          "source_sha256_lf": "ff138462828d05a6dacd4fb8cf09910db3a3db5b6cef912f1936a665e7148040",
+          "modified": false
+        },
+        {
+          "name": "GetRoot",
+          "start_line": 702,
+          "end_line": 709,
+          "source_sha256_lf": "f26dd23490e2bad5b8ed905cdbbf47009e2c176fbf7f06cb72ec5189917147fe",
+          "modified": false
+        },
+        {
+          "name": "CheckAndRootTree",
+          "start_line": 711,
+          "end_line": 736,
+          "source_sha256_lf": "b46c48c7f0cace65c59da23913e80d7ecf3833de2a15360a8a2dd8ea1f747223",
+          "modified": false
+        },
+        {
+          "name": "Orthologs_and_Suspect",
+          "start_line": 738,
+          "end_line": 756,
+          "source_sha256_lf": "0b66562fb5bb3dcfe5f434906fb3ac207683cbf0b18b52164d3dded576134c63",
+          "modified": false
+        },
+        {
+          "name": "GetOrthologues_from_tree",
+          "start_line": 759,
+          "end_line": 850,
+          "source_sha256_lf": "764f86e4490e3ab47748f89dcb11b8ddbcc0dd6cdaebd12c171e943e522c34ec",
+          "modified": false
+        },
+        {
+          "name": "Resolve",
+          "start_line": 943,
+          "end_line": 947,
+          "source_sha256_lf": "f2ee7bfc26cf9d46c4746453ab1b5f142f9323ad2c5eaa6e8cfae0af5e2f8ff5",
+          "modified": false
+        },
+        {
+          "name": "GetSpeciesNeighbours",
+          "start_line": 949,
+          "end_line": 967,
+          "source_sha256_lf": "283d17588c99d03c15da825ebabe160f84c865038c8724eb56512fba9ad75f70",
+          "modified": false
+        }
+      ]
+    },
+    {
+      "upstream_path": "OrthoFinder-master/scripts_of/resolve.py",
+      "upstream_sha256": "cac969f1c9773b66af2bb69e33b84ccd1d5eee87d825dd714ed1e3cfae424277",
+      "vendored_path": "resolve.py",
+      "vendored_sha256": "0a1f0e47199bad2b9b2bdc396cac40db7281ad1136b05039df0ba45e951a80e4",
+      "symbols": [
+        {
+          "name": "DetachAndCleanup",
+          "start_line": 23,
+          "end_line": 43,
+          "source_sha256_lf": "66e9ee619f33f1bcfa4f2229ae30e243dc7b772ae4cc8122bc071b8d5ad33cb6",
+          "modified": false
+        },
+        {
+          "name": "GraftAndUpdate",
+          "start_line": 45,
+          "end_line": 93,
+          "source_sha256_lf": "e5ffc939092bb12e6ff4a68d84e6d197f9d0c6fefdfe3e5b26efd9c03ecd19ba",
+          "modified": false
+        },
+        {
+          "name": "GraftTripartAndUpdate",
+          "start_line": 95,
+          "end_line": 120,
+          "source_sha256_lf": "7bd81dfd3bf7f21ed8903541f202a3c95637b927284eb26097d2a01b5e1dac0b",
+          "modified": false
+        },
+        {
+          "name": "ContainsMonophyletic",
+          "start_line": 122,
+          "end_line": 145,
+          "source_sha256_lf": "29f6233efbfd6d0ee2fb9ae804e774002dda7dc42652f4c393b8d98a87944910",
+          "modified": false
+        },
+        {
+          "name": "check_monophyly",
+          "start_line": 147,
+          "end_line": 158,
+          "source_sha256_lf": "f10ecbded08e6a82a1d62f3f06fe5012e2aaab1472518538a9a5a1f374d319e6",
+          "modified": false
+        },
+        {
+          "name": "resolve",
+          "start_line": 182,
+          "end_line": 334,
+          "source_sha256_lf": "2f50889d2a8ed0bb9beda3db6bcaaa2c43eac05d7abd7e1eb990841f48246249",
+          "modified": false
+        }
+      ]
+    },
+    {
+      "upstream_path": "OrthoFinder-master/scripts_of/tree.py",
+      "upstream_sha256": "718bc79cf51a932c59dff3cca9e9889aab9ec415051d4ce2f988e185001b9dfd",
+      "vendored_path": "tree.py",
+      "vendored_sha256": "718bc79cf51a932c59dff3cca9e9889aab9ec415051d4ce2f988e185001b9dfd"
+    },
+    {
+      "upstream_path": "OrthoFinder-master/scripts_of/newick.py",
+      "upstream_sha256": "5e4c5759ab75778c6c0459772e8f335e046e04592c8bd829c6982517ba4f2e68",
+      "vendored_path": "newick.py",
+      "vendored_sha256": "5e4c5759ab75778c6c0459772e8f335e046e04592c8bd829c6982517ba4f2e68"
+    },
+    {
+      "upstream_path": "OrthoFinder-master/License.md",
+      "upstream_sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",
+      "vendored_path": "LICENSE",
+      "vendored_sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"
+    }
+  ],
+  "changes": [
+    "Select dependency-closed algorithm definitions and resolve case-table constants from the original modules; remove CLI, file-manager, multiprocessing, and unrelated analysis imports.",
+    "HogWriter.__init__ retains species-column, HOG-content, and comparable-node mappings but exposes header and rows instead of opening result files.",
+    "HogWriter.WriteCachedHOGs and write_hog_genes collect (level, row) pairs in rows, sorting levels deterministically; the latter preserves its original matching N0.ids identifier.",
+    "HogWriter.close_files is a no-op because the collector owns no files.",
+    "Add module provenance/docstrings and a Python 3 xrange alias. No computational function bodies have been altered."
+  ]
+}

@@ -45,7 +45,11 @@ def add_parser(sp):
                    help='threads per HOG for OrthoFinder+MMseqs/CD-HIT (default 1, capped by -t)')
     p.add_argument('--hybrid-timeout', type=float, default=300.,
                    help='seconds per within-HOG subprocess (default 300); total candidate/global budgets also apply')
-    p.add_argument('--tree', help='user-supplied rooted assembly tree; tip names equal assembly_ID')
+    p.add_argument('--tree', '--species-tree', dest='tree',
+                   help='assembly/species tree (rooted for other methods); hog-tree roots it using --outgroup; tips equal assembly_ID')
+    p.add_argument('--outgroup', help='comma-separated species-tree assembly IDs; REQUIRED for hog-tree')
+    p.add_argument('--split-paralogous-clades', action='store_true',
+                   help='hog-tree only: enable the extra within-HOG paralogous clade split (OrthoFinder -y)')
     p.add_argument('--gene-tree', help='family gene tree in Newick with branch lengths; tips equal protein IDs')
     p.add_argument('--tree-threshold', type=float, default=.1,
                    help='tree complete-linkage maximum within-cluster path length (default 0.1; branch-length units)')
@@ -75,6 +79,11 @@ def add_parser(sp):
 
 
 def configure(args):
+    if args.method == 'hog-tree':
+        if not (args.tree and args.gene_tree and getattr(args, 'outgroup', None)):
+            raise ValueError('hog-tree requires --tree, --gene-tree and an explicit --outgroup')
+        if args.target != 'hog':
+            raise ValueError('hog-tree requires --target hog')
     config = json.loads(json.dumps(DEFAULTS))
     if args.config:
         supplied = json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
@@ -119,6 +128,8 @@ def candidates_for(methods, args, config):
         default = {} if method == 'orthofinder' else {'identity': args.identity, 'coverage': args.coverage}
         if method == 'tree':
             default = {'threshold': args.tree_threshold}
+        if method == 'hog-tree':
+            default = {'split_paralogous_clades': getattr(args, 'split_paralogous_clades', False)}
         if method.endswith('mcl'):
             default['inflation'] = args.inflation
         if method == 'weighted-louvain':
@@ -131,6 +142,8 @@ def candidates_for(methods, args, config):
             if not isinstance(override, dict) or set(override)-default.keys():
                 raise ValueError('unsupported parameters for ' + method)
             params = dict(default, **override)
+            if method == 'hog-tree' and not isinstance(params['split_paralogous_clades'], bool):
+                raise ValueError('split_paralogous_clades must be boolean')
             if 'identity' in params and (not 0 <= params['identity'] <= 1 or not 0 <= params['coverage'] <= 1):
                 raise ValueError('identity/coverage must be in [0,1]')
             if method == 'tree' and (not math.isfinite(params['threshold']) or params['threshold'] < 0):
@@ -242,6 +255,7 @@ def run(args):
         raise ValueError('output must not contain original input files')
     versions = tool_versions()
     code_files = list(Path(__file__).parent.glob('*.py')) + list(Path(__file__).parents[1].glob('*.py'))
+    code_files += list((Path(__file__).parents[1] / 'orthofinder_hog').glob('*.py'))
     identity = {'inputs': hashes, 'config': config, 'tools': versions,
                 'code': {str(p.relative_to(Path(__file__).parents[1])): digest(p) for p in code_files},
                 'args': {k: v for k, v in vars(args).items() if k not in ('func', 'output', 'resume')}}
@@ -275,6 +289,7 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
     (out/'candidates').mkdir(exist_ok=True)
     manifest = dict(identity, fingerprint=fingerprint, target=args.target,
                     commands=previous.get('commands', []) if previous else [],
+                    family_hog_runs=previous.get('family_hog_runs', []) if previous else [],
                     louvain_runs=previous.get('louvain_runs', []) if previous else [],
                     seed=config['seed'], perturbation={'scheme': None, 'runs': 0, 'R': None,
                     'reason': 'no biologically justified perturbation implemented'},
@@ -364,6 +379,10 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
                 c = json.loads(cache.read_text(encoding='utf-8'))
                 if c['fingerprint'] != fingerprint or not table_path.exists() or digest(table_path) != c['table_sha256']:
                     raise ValueError('candidate cache integrity mismatch; use a new output directory')
+                if method == 'hog-tree':
+                    artifacts = c.get('artifact_hashes', {})
+                    if not artifacts or any(not Path(p).is_file() or digest(p) != expected for p, expected in artifacts.items()):
+                        raise ValueError('HOG artifact cache integrity mismatch; use a new output directory')
                 partition([[g for g, label in c['labels'].items() if label == group] for group in set(c['labels'].values())], seqs)
                 if read_tsv(table_path) != cluster_rows(c['labels'], assemblies):
                     raise ValueError('cache labels do not match validated cluster table')
@@ -385,6 +404,8 @@ def schedule(args, config, seqs, assemblies, constraints, conflicts, out, identi
                     labels, unsupported, factors = execute(method, params, context, candidate_work)
                     c = dict(id=cid, method=method, params=params, labels=labels, unsupported=unsupported,
                              factors=factors, runtime_seconds=time.monotonic()-started, fingerprint=fingerprint)
+                    if method == 'hog-tree':
+                        c['artifact_hashes'] = context['hog_artifact_hashes']
                     tsv(table_path, cluster_rows(labels, assemblies), ['gene_ID', 'assembly_ID', 'cluster_ID'])
                     c['table_sha256'] = digest(table_path)
                     json_write(cache, c)

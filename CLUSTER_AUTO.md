@@ -1,8 +1,11 @@
 # Unified cluster and experimental auto mode
 
 This is an implemented candidate comparison framework, not a validated orthology
-oracle. It targets ONE curated homologous family at a time. It does not build a
-BUSCO tree, infer reliable duplication events, or manufacture biological labels.
+oracle. It targets ONE curated homologous family at a time. The optional
+`hog-tree` method infers duplication events and HOGs using copied OrthoFinder
+code and explicit species-tree rooting; these inferences require biological
+validation. BUSCO tree construction is provided separately by `species-tree`.
+See [FAMILY_HOGS.md](FAMILY_HOGS.md) for required trees and outgroup handling.
 Install numpy/pandas/scipy/biopython, `requirements-metrics.txt`, and the desired external tools in the Ubuntu environment.
 Missing primary executables are recorded as skipped. A tool failing during a run
 is recorded as failed; other candidates continue.
@@ -12,6 +15,10 @@ is recorded as failed; other candidates continue.
 Copy the updated `oggi.py`, the ENTIRE `cluster_engine/` directory, and the updated
 support modules into `~/oggi_v1/` (copying only the old OrthoFinder wrapper is not
 enough). Activate your environment and run tests before the expensive analysis:
+
+Include the `orthofinder_hog/` directory and its source/license notices when
+using `hog-tree`; its code is bundled and does not require the original
+`OrthoFinder-master/` directory.
 
 ```bash
 conda activate oggi

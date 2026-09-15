@@ -14,7 +14,7 @@ from pathlib import Path
 from .data import fasta, partition, write_fasta, digest
 
 METHODS = ('orthofinder', 'mmseqs', 'cdhit', 'orthofinder-mmseqs',
-           'orthofinder-cdhit', 'weighted-mcl', 'similarity-mcl', 'weighted-louvain', 'tree')
+           'orthofinder-cdhit', 'weighted-mcl', 'similarity-mcl', 'weighted-louvain', 'tree', 'hog-tree')
 
 
 class Runner:
@@ -104,6 +104,15 @@ class Runner:
 def applicable(method, context):
     args = context['args']
     dependencies = []
+    if method == 'hog-tree':
+        if not (args.tree and args.gene_tree and getattr(args, 'outgroup', None)):
+            return 'hog-tree requires --tree, --gene-tree and an explicit --outgroup'
+        if args.target != 'hog':
+            return 'hog-tree infers HOGs; use --target hog'
+        try:
+            import Bio
+        except ImportError:
+            return 'missing dependency: biopython'
     if method == 'tree':
         if not args.gene_tree:
             return 'no --gene-tree supplied (the --tree argument is an assembly/species tree)'
@@ -445,7 +454,10 @@ def louvain_groups(params, context, work):
 
 
 def execute(method, params, context, work):
-    if method == 'tree':
+    if method == 'hog-tree':
+        from .hog_tree import cluster
+        groups, unsupported, factors = cluster(params, context, work)
+    elif method == 'tree':
         from .tree import cluster
         groups, unsupported, factors = cluster(params, context)
     elif method == 'weighted-louvain':

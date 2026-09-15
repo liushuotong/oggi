@@ -15,7 +15,8 @@ WEIGHTS = {'B': 0.60, 'R': 0.15, 'A': 0.10, 'Q': 0.15}
 CATEGORIES = {'orthofinder': 'phylogenetic', 'orthofinder-mmseqs': 'phylogenetic',
               'orthofinder-cdhit': 'phylogenetic', 'mmseqs': 'sequence-greedy',
               'cdhit': 'sequence-greedy', 'weighted-mcl': 'graph-mcl',
-              'similarity-mcl': 'graph-mcl', 'weighted-louvain': 'graph-community', 'tree': 'tree-distance'}
+              'similarity-mcl': 'graph-mcl', 'weighted-louvain': 'graph-community', 'tree': 'tree-distance',
+              'hog-tree': 'phylogenetic'}
 
 
 def ari(a, b):

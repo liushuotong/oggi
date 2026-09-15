@@ -101,6 +101,25 @@ Run `python oggi.py -h` (and `python oggi.py <module> -h`) for every option.
 
 ## Pipeline modules
 
+### `oggi cluster -M hog-tree` — Recursive HOG inference for one family
+
+Infer HOGs from a target family gene tree and an explicitly outgroup-rooted
+species tree using the copied OrthoFinder rooting/reconciliation/HOG algorithms:
+
+```bash
+python oggi.py cluster -M hog-tree \
+  -i results/MYB/gene_family.fa --gene-map results/MYB/gene_to_assembly.tsv \
+  --gene-tree results/MYB/family.treefile \
+  --species-tree results/species_tree/05_iqtree/species_tree.treefile \
+  --outgroup OUTGROUP_ASSEMBLY_ID --hog-level N1 -o results/MYB.hog_tree
+```
+
+An explicit `--outgroup` is mandatory. IQ-TREE and FastTree Newick species trees
+are accepted; the adapter roots them and exports the generated node labels.
+`--split-paralogous-clades` enables the extra upstream `-y` behavior.
+See [FAMILY_HOGS.md](FAMILY_HOGS.md) for rooting, hierarchy levels, outputs, and
+[source/license notices](THIRD_PARTY_NOTICES.md).
+
 ### `oggi busco` — Run BUSCO per assembly
 
 Run BUSCO on one FASTA, a directory of FASTAs, or the manifest produced by
@@ -363,6 +382,7 @@ All wrappers convert their results into shared long tables where possible:
 ```
 oggi.py                     entry point (pipeline + tool pass-through)
 cluster_engine/             adapters, scheduler, evidence, scoring, reporting
+orthofinder_hog/             copied OrthoFinder/ETE HOG core and GPL source notices
 environment.yml             conda environment
 gene_family_identification.py   HMM+diamond identification core
 sub_collinearity_pre_process.py per-assembly windows + window all-vs-all
@@ -380,7 +400,9 @@ wgdi_all_vs_all.py / mcscan_all_vs_all.py    method wrappers
 
 ## Dependencies and licenses
 
-OGGI itself is released under the MIT License (see `LICENSE`). It *calls*
+Original OGGI code carries the BSD 2-Clause License (see `LICENSE`). The bundled
+OrthoFinder/ETE code used by `cluster -M hog-tree` retains its GPL notices; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). OGGI also *calls*
 external programs (AGAT, DIAMOND, HMMER, MCL, CD-HIT, MMseqs2, OrthoFinder,
 WGDI, MCScanX, MAFFT, trimAl, IQ-TREE) as separate executables; each remains under its own license
 (see `environment.yml` for the conda packages). If you redistribute OGGI with
