@@ -41,7 +41,7 @@ dependencies:
   - mcl                     # oggi cluster -M mcl
 
   # ---- BUSCO protein alignments and species/assembly phylogeny ----
-  - busco                   # generate per-assembly BUSCO completeness and single-copy outputs
+  - busco                   # oggi busco: per-assembly completeness and single-copy outputs
   - mafft                   # oggi species-tree: per-BUSCO protein alignment
   - trimal                  # oggi species-tree --trim automated1 (optional at runtime)
   - iqtree>=2               # oggi species-tree: partitioned maximum-likelihood tree

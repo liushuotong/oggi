@@ -5,6 +5,19 @@ groups sequences by **BUSCO ID**, aligns each gene with MAFFT, concatenates the
 alignments by **assembly ID**, and runs IQ-TREE 2/3. Each assembly becomes one
 tree tip. This module does not rerun BUSCO.
 
+To generate the BUSCO inputs first, use the [BUSCO running interface](BUSCO.md):
+
+```bash
+python oggi.py busco \
+  --manifest processed/assembly_manifest.tsv \
+  --mode proteins --lineage viridiplantae_odb12.2 \
+  --threads 32 -o results/busco
+
+python oggi.py species-tree \
+  --manifest results/busco/busco_manifest.tsv \
+  --threads 32 --jobs 8 -o results/species_tree
+```
+
 ## 1. Input Directory
 
 Set `--busco-dir` to the **shared parent directory** containing the BUSCO results

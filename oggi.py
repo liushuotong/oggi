@@ -12,6 +12,7 @@ GFF_EXTS = (".gff", ".gff3")
 # pass-through subcommands: (module, entry function); all remaining
 # arguments are handed to that module's own argparse
 TOOL_CLIS = {
+    "busco": ("busco_process", "run_busco_cli"),
     "species-tree": ("species_tree", "run_species_tree_cli"),
     "cdhit": ("cdhit_process", "run_cdhit"),
     "mmseqs": ("mmseqs_process", "run_mmseqs_cli"),
@@ -261,7 +262,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="oggi",
         description="OGGI pangenome pipeline: reduce -> identify -> subcoli -> cluster\n"
-                    "BUSCO phylogeny: species-tree\n"
+                    "BUSCO phylogeny: busco -> species-tree\n"
                     "tool wrappers (own CLI): cdhit | mmseqs | orthofinder | wgdi | mcscanx",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-v", "--version", action="version", version="oggi v1")

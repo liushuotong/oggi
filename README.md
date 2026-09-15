@@ -12,7 +12,7 @@ methods can be run and compared from one entry point.
 
 ```
 reduce -> identify -> subcoli -> cluster        (OGGI pipeline)
-species-tree: BUSCO -> MAFFT -> concatenate -> IQ-TREE
+busco -> species-tree: BUSCO -> MAFFT -> concatenate -> IQ-TREE
 cdhit | mmseqs | orthofinder | wgdi | mcscanx   (method wrappers)
 ```
 
@@ -51,7 +51,7 @@ The environment installs the Python libraries and all external programs:
 | OrthoFinder | `oggi orthofinder` | phylogenetic orthology method wrapper |
 | WGDI | `oggi wgdi` | -icl collinearity method wrapper |
 | MCScanX | `oggi mcscanx` | collinearity method wrapper |
-| BUSCO | Upstream input for `oggi species-tree` | completeness assessment and single-copy marker extraction |
+| BUSCO | `oggi busco` | completeness assessment and single-copy marker extraction |
 | MAFFT / trimAl / IQ-TREE | `oggi species-tree` | BUSCO protein alignment, optional trimming, partitioned phylogeny |
 
 Update an existing environment with `conda env update -n oggi -f environment.yml`.
@@ -100,6 +100,29 @@ Run `python oggi.py -h` (and `python oggi.py <module> -h`) for every option.
 ---
 
 ## Pipeline modules
+
+### `oggi busco` — Run BUSCO per assembly
+
+Run BUSCO on one FASTA, a directory of FASTAs, or the manifest produced by
+`reduce`. Each assembly gets a separate output directory. All runs share one
+explicit versioned lineage, and completed batches export a `species-tree` input
+manifest.
+
+```bash
+python oggi.py busco \
+  --manifest processed/assembly_manifest.tsv \
+  --mode proteins --lineage viridiplantae_odb12.2 \
+  --threads 32 -o results/busco
+
+python oggi.py species-tree \
+  --manifest results/busco/busco_manifest.tsv \
+  --threads 32 --jobs 8 -o results/species_tree
+```
+
+Use `-i proteomes/` for directory input or `-i sample.faa` for one file. Set
+`--mode genome` or `--mode transcriptome` for nucleotide input. Python callers
+can import `run_busco` and `run_busco_batch` from `busco_process`.
+See [BUSCO.md](BUSCO.md) for function examples, dataset caches, and output details.
 
 ### `oggi species-tree` — BUSCO single-copy species/assembly tree
 
@@ -349,6 +372,7 @@ collinearity_matrix.py          real block file -> collinearity mask matrix
 BLASTP_process.py               outfmt6 -> similarity/alignment matrices
 MCL_matrix.py                   four-matrix product + mcl --abc runner
 assembly_matrix.py              species tree -> assembly penalty matrix
+busco_process.py                run BUSCO per assembly -> species-tree manifest
 species_tree.py                 BUSCO single-copy proteins -> MAFFT -> IQ-TREE
 cdhit_process.py / mmseqs_process.py / orthofinder_process.py /
 wgdi_all_vs_all.py / mcscan_all_vs_all.py    method wrappers
