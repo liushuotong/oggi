@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Orthologous-Gene-Group Inference toolkit for plant pangenome analyses"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "BSD-2-Clause AND GPL-3.0-or-later"
+license = "BSD-2-Clause AND GPL-3.0-only AND GPL-3.0-or-later"
 license-files = ["LICENSE", "orthofinder_hog/LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [
   { name = "Shuotong Liu" },
@@ -53,6 +53,7 @@ py-modules = [
   "collinearity_matrix",
   "collinearity",
   "gene_family_identification",
+  "gene_id_utils",
   "MCL_matrix",
   "mcscan_all_vs_all",
   "mmseqs_process",

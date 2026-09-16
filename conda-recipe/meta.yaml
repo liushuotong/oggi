@@ -12,6 +12,8 @@ source:
 build:
   number: 0
   noarch: python
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x") }}
   script: "{{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation"
   entry_points:
     - oggi = oggi:main
@@ -64,7 +66,7 @@ about:
     OGGI integrates gene-family identification, synteny evidence,
     orthology-aware clustering, BUSCO species-tree construction, and wrappers
     for common plant pangenome analysis tools.
-  license: BSD-2-Clause AND GPL-3.0-or-later
+  license: BSD-2-Clause AND GPL-3.0-only AND GPL-3.0-or-later
   license_file:
     - LICENSE
     - orthofinder_hog/LICENSE

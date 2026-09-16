@@ -89,7 +89,8 @@ def identification_extract_seq(id, seq_file, output_file):
 
 
 def main_identification(assembly_file_dict, hmm_dict, ref_seq_dict,
-                        evalue_hmm, evalue_blastp, output_dir, cpu):
+                        evalue_hmm, evalue_blastp, output_dir, cpu,
+                        bed_by_assembly=None, input_cache_dir=None):
     """Identify family members per assembly.
 
     Args:
@@ -100,12 +101,30 @@ def main_identification(assembly_file_dict, hmm_dict, ref_seq_dict,
                                                   after merging)
             gene_family.fa                       (all members concatenated)
             gene_to_assembly.tsv                 (final result table)
+        bed_by_assembly: optional assembly -> BED path mapping. Matching BED
+            files next to proteins are inferred when this mapping is omitted.
+        input_cache_dir: shared directory for automatically prefixed input
+            copies. All input protein IDs are checked before running searches;
+            globally unique inputs keep their original IDs and paths.
     Returns:
         (gene_to_assembly, sorted_id, family_fasta)
         gene_to_assembly: {gene_ID: assembly}
         sorted_id: set of all member gene IDs
         family_fasta: path of gene_family.fa
     """
+    from gene_id_utils import prepare_gene_inputs
+    rows = []
+    for assembly, pep in assembly_file_dict:
+        row = {"assembly": assembly, "pep": pep}
+        if bed_by_assembly is not None:
+            row["bed"] = bed_by_assembly[assembly]
+        else:
+            bed = os.path.splitext(pep)[0] + ".bed"
+            if os.path.isfile(bed):
+                row["bed"] = bed
+        rows.append(row)
+    rows = prepare_gene_inputs(rows, input_cache_dir or os.path.join(output_dir, ".oggi_unique_ids"))
+    assembly_file_dict = [[row["assembly"], row["pep"]] for row in rows]
     os.makedirs(output_dir, exist_ok=True)
     gene_to_assembly = {}
     sorted_id = set()

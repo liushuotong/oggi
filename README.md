@@ -16,9 +16,9 @@ busco -> species-tree: BUSCO -> MAFFT -> concatenate -> IQ-TREE
 cdhit | mmseqs | orthofinder | wgdi | mcscanx   (method wrappers)
 ```
 
-> Status: research code accompanying a manuscript under review. The pipeline
-> is stable at the module level; benchmark analyses and a formal release will
-> follow publication.
+> Status: research software accompanying a manuscript under review. Version
+> 1.0.0 is the first packaged release; manuscript review and benchmark
+> publication are ongoing.
 
 ---
 
@@ -207,11 +207,22 @@ Outputs:
 | `<out>.family.fa` | protein sequences of all identified family members |
 | `<out>.gene_to_assembly.tsv` | `gene_ID<TAB>assembly_ID` |
 
-Gene IDs must encode the assembly as the prefix before the first `_`
-(e.g. `534M_025.972`).  The manifest assembly name (first column) does not
-need to equal that prefix (`subcoli` learns the prefix -> assembly mapping
-from the `identify` id-table, so e.g. a manifest row `01.col` pointing at
-`col_AT5G38860.1`-style genes works).
+Before searching, `identify` checks **all input protein IDs**, including proteins
+that will not match the family. If IDs are globally unique, they stay unchanged.
+If any protein ID occurs in multiple assemblies, every protein ID and BED
+fourth-column ID receives an `assembly_` prefix (for example,
+`Abd-0_AT1G73190.1.Araport11.447`). Duplicates within one assembly and collisions
+remaining after prefixing are errors, because a sample prefix cannot resolve them.
+
+Original reduce outputs are preserved. Synchronized protein/BED copies and an
+absolute-path `assembly_manifest.tsv` are cached under `.oggi_unique_ids/` next
+to the input manifest; the prepared manifest path is printed. Repeated runs
+reuse unchanged copies without adding another prefix. `subcoli` applies the same
+preparation automatically, so both commands can keep using the original manifest.
+Use the newly generated family FASTA and `gene_to_assembly.tsv` downstream, and
+regenerate any previous BLAST/collinearity results that contain the old IDs.
+The main pipeline determines assembly membership from the manifest and ID table;
+already unique IDs do not need an assembly prefix.
 
 ### `oggi subcoli`  - ?sub-collinearity
 

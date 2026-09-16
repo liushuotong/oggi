@@ -144,7 +144,10 @@ def run_identify(args):
     gene_to_assembly, ids, seq_path = gfi.main_identification(
         assembly_file_dict, hmm_dict, ref_seq_dict,
         args.evalue_hmm, args.evalue_blastp,
-        args.output, args.threads)
+        args.output, args.threads,
+        bed_by_assembly={r["assembly"]: r["bed"] for r in rows},
+        input_cache_dir=os.path.join(os.path.dirname(os.path.abspath(args.manifest)),
+                                     ".oggi_unique_ids"))
 
     print("identify done: %d genes from %d assemblies -> %s"
           % (len(ids), len(rows), args.output))
@@ -177,8 +180,11 @@ def add_subcoli_parser(sp):
 def run_subcoli(args):
     import sub_collinearity as sci
     import sub_collinearity_pre_process as scp
+    from gene_id_utils import prepare_gene_inputs
 
-    rows = load_manifest(args.manifest)
+    rows = prepare_gene_inputs(
+        load_manifest(args.manifest),
+        os.path.join(os.path.dirname(os.path.abspath(args.manifest)), ".oggi_unique_ids"))
     pep_of = {r["assembly"]: r["pep"] for r in rows}
     bed_of = {r["assembly"]: r["bed"] for r in rows}
     gene_to_assembly = {}

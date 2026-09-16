@@ -5,9 +5,10 @@ The original OGGI license text is in [LICENSE](LICENSE), which carries the BSD
 
 This source distribution also includes copied OrthoFinder and ETE code in
 `orthofinder_hog/`. Those files are covered by their GNU GPL notices, not by the
-OGGI BSD license. The full GPL version 3 text is retained in
-[orthofinder_hog/LICENSE](orthofinder_hog/LICENSE). The byte-preserved ETE files
-retain their GPL version 3-or-later notices and original author attribution.
+OGGI BSD license. The adapted OrthoFinder definitions are GPL-3.0-only, and the
+byte-preserved ETE files retain their GPL-3.0-or-later notices and original
+author attribution. The full GPL version 3 text is retained in
+[orthofinder_hog/LICENSE](orthofinder_hog/LICENSE).
 
 The `hog-tree` integration imports and uses this GPL-licensed code. Distribution
 of the integrated code must follow the applicable GPL terms; the project should
