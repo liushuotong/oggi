@@ -16,9 +16,9 @@ busco -> species-tree: BUSCO -> MAFFT -> concatenate -> IQ-TREE
 cdhit | mmseqs | orthofinder | wgdi | mcscanx   (method wrappers)
 ```
 
-> Status: research code accompanying a manuscript under review. The pipeline
-> is stable at the module level; benchmark analyses and a formal release will
-> follow publication.
+> Status: research software accompanying a manuscript under review. Version
+> 1.0.0 is the first packaged release; manuscript review and benchmark
+> publication are ongoing.
 
 ---
 

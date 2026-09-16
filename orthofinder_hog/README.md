@@ -13,7 +13,8 @@ by David Emms and contributors.
   tables from `scripts_of/resolve.py`.
 - `tree.py` and `newick.py`: byte-for-byte copies of the original files. Their ETE
   copyright and GPL version 3-or-later notices are preserved.
-- `LICENSE`: a byte-for-byte copy of OrthoFinder's `License.md` (GNU GPL version 3).
+- `LICENSE`: a byte-for-byte copy of OrthoFinder's `License.md`
+  (GPL-3.0-only).
 - `PROVENANCE.json`: source-file SHA-256 values, copied-file SHA-256 values,
   original line numbers, and hashes of the copied computational definitions.
 
