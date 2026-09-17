@@ -150,10 +150,10 @@ IDs in `gene_to_assembly.tsv`. To specify different labels, create a
 
 ```text
 assembly	busco_dir
-01.sample_AGAT	/path/to/busco/sample01
-02.sample_AGAT	/path/to/busco/sample02
-03.sample_AGAT	/path/to/busco/sample03
-04.sample_AGAT	/path/to/busco/sample04
+01.sample	/path/to/busco/sample01
+02.sample	/path/to/busco/sample02
+03.sample	/path/to/busco/sample03
+04.sample	/path/to/busco/sample04
 ```
 
 ```bash

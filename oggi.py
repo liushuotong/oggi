@@ -61,7 +61,7 @@ def add_reduce_parser(sp):
     p.add_argument("--genome-dir", required=True,
                    help="directory of matching genome fasta files")
     p.add_argument("-o", "--output", required=True,
-                   help="output directory for *_AGAT files and manifest")
+                   help="output directory for <assembly>.gff/.pep/.bed and manifest")
     p.add_argument("--skip-existing", action="store_true")
     p.set_defaults(func=run_reduce)
 
@@ -83,7 +83,7 @@ def run_reduce(args):
             if genome is None:
                 print("WARNING: no genome fasta matching %s" % gff)
                 continue
-            prefix = os.path.join(args.output, asm + "_AGAT")
+            prefix = os.path.join(args.output, asm)
             pep_out = prefix + ".pep"
             complete = all(os.path.isfile(prefix + ext) and os.path.getsize(prefix + ext) > 0
                            for ext in ('.gff', '.pep', '.bed'))

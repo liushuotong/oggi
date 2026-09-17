@@ -102,7 +102,7 @@ class UpstreamIntegrationTests(unittest.TestCase):
             (genomes/(asm+'.fa')).write_text('>chr1\nATGATGATG\n')
         def fake_agat(cmd):
             out=pathlib.Path(cmd[cmd.index('-o')+1])
-            asm=out.name.split('_')[0]
+            asm=out.stem
             if out.suffix=='.bed':
                 out.write_text(''.join('chr1\t%d\t%d\t%s%d\n'%(i*100,i*100+80,asm,i) for i in range(1,7)))
             elif out.suffix=='.pep':
@@ -111,13 +111,13 @@ class UpstreamIntegrationTests(unittest.TestCase):
         reduce=argparse.Namespace(gff_dir=str(gffs),genome_dir=str(genomes),output=str(processed),skip_existing=False)
         with patch.object(pre,'run_agat',side_effect=fake_agat):
             oggi.run_reduce(reduce)
-            (processed/'A_AGAT.bed').unlink()
+            (processed/'A.bed').unlink()
             reduce.skip_existing=True
             oggi.run_reduce(reduce)
-        self.assertTrue((processed/'A_AGAT.bed').exists())
+        self.assertTrue((processed/'A.bed').exists())
         family=self.root/'family'
         with patch.object(gfi,'identification_caculation',side_effect=lambda h,r,eh,eb,fa,out,asm,cpu:{asm+'3'}):
-            mapping,ids,fa=gfi.main_identification([['A',str(processed/'A_AGAT.pep')],['B',str(processed/'B_AGAT.pep')]],[],[],1e-5,1e-5,str(family),1)
+            mapping,ids,fa=gfi.main_identification([['A',str(processed/'A.pep')],['B',str(processed/'B.pep')]],[],[],1e-5,1e-5,str(family),1)
         blast=self.root/'hits'
         blast.write_text(''.join('A%d\tB%d\t95\t20\t0\t0\t1\t20\t1\t20\t1e-40\t100\n'%(i,i) for i in range(1,7)))
         args=argparse.Namespace(manifest=str(processed/'assembly_manifest.tsv'),id_table=str(family/'gene_to_assembly.tsv'),
@@ -126,7 +126,7 @@ class UpstreamIntegrationTests(unittest.TestCase):
         self.assertTrue((self.root/'subcoli.collinear_pairs.tsv').stat().st_size>0)
         with patch.object(gfi,'identification_caculation',return_value=set()):
             with self.assertRaisesRegex(ValueError,'no family genes'):
-                gfi.main_identification([['A',str(processed/'A_AGAT.pep')]],[],[],1e-5,1e-5,str(self.root/'empty'),1)
+                gfi.main_identification([['A',str(processed/'A.pep')]],[],[],1e-5,1e-5,str(self.root/'empty'),1)
 
 
 if __name__=='__main__': unittest.main()

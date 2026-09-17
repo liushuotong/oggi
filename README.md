@@ -178,12 +178,12 @@ stage controls, complete output list, and Ubuntu commands.
 For every `.gff/.gff3` file (matched to a genome FASTA by basename), runs the
 AGAT chain `agat_sp_keep_longest_isoform.pl` ->
 `agat_sp_extract_sequences.pl` (CDS and `-p` protein extraction) ->
-`agat_convert_sp_gff2bed.pl`, producing `*_AGAT.pep` and `*_AGAT.bed` plus the
-central manifest file:
+`agat_convert_sp_gff2bed.pl`, producing `<assembly>.pep` and `<assembly>.bed`
+plus the central manifest file:
 
 ```
 assembly<TAB>pep<TAB>bed
-534M<TAB>processed/534M_AGAT.pep<TAB>processed/534M_AGAT.bed
+534M<TAB>processed/534M.pep<TAB>processed/534M.bed
 ```
 
 The manifest is consumed by all later steps.
@@ -334,7 +334,7 @@ is scanned for proteome FASTA files, so these six `.pep` files can be used
 directly, one file per assembly. The wrapper prints the resolved result
 directory and writes `Phylogenetic_Hierarchical_Orthogroups/N0.long.tsv`
 there, with columns `gene_ID`, `ogg_cluster`, `assembly_ID`.
-Assembly labels follow the input filenames (e.g. `01.col_AGAT`); gene IDs
+Assembly labels follow the input filenames (e.g. `01.col`); gene IDs
 are preserved as they appear in OrthoFinder's output. This is a whole-proteome
 analysis, not a restriction to one TF family; HOG membership is not an allele call.
 

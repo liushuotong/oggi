@@ -36,7 +36,7 @@ def mcscanx_BLASTP(seq_1, seq_2, max_seq_hit=10, evalue=1e-5, out_prefix=None):
     When out_prefix is omitted it is derived from the two file names so that
     it matches the gff prefix of bed_to_gff_for_mcscanx (this requires the
     pep and bed files to share the same basename, i.e. the same batch of
-    *_AGAT outputs)."""
+    `oggi reduce` outputs)."""
     if shutil.which("diamond") is None:
         raise FileNotFoundError("diamond not in PATH")
     if out_prefix is None:

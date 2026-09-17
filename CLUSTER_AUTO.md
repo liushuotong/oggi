@@ -42,10 +42,11 @@ oggi cluster -M auto -i family.fa --gene-map gene_map.tsv \
 ```
 
 The original gene map can use names such as `01.col` while OrthoFinder uses
-`01.col_AGAT`. Exact assembly names take priority. Otherwise, actual target gene
+`01.col_v2`. Exact assembly names take priority. Otherwise, actual target gene
 memberships in the selected HOG table must identify exactly one OrthoFinder
 column for each inferred alias. Aliases must be one-to-one. Ambiguous/conflicting
-memberships fail explicitly; no gene-prefix or `_AGAT` string heuristic is used.
+memberships fail explicitly; no gene-prefix or filename-suffix string heuristic
+is used.
 An assembly with no matching gene IDs is left unresolved, never guessed. Gene
 IDs, isoform suffixes, the input gene map and downstream assembly labels stay
 unchanged. The full-proteome launch route still requires exact proteome names

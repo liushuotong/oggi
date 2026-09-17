@@ -84,8 +84,8 @@ def run_agat(cmd, shell=False):
 
 def sub_collinearity_gff_process(gff_file, seq_file):
     # use AGAT to process gff file and extract gene sequences
-    seq_base_name = os.path.splitext(os.path.basename(seq_file))[0] + "_AGAT"
-    gff_base_name = os.path.splitext(os.path.basename(gff_file))[0] + "_AGAT"
+    seq_base_name = os.path.splitext(os.path.basename(seq_file))[0]
+    gff_base_name = os.path.splitext(os.path.basename(gff_file))[0]
 
     # step 1: get longest transcript for each gene
     cmd_keep_longest = f"agat_sp_keep_longest_isoform.pl --gff {gff_file} \
