@@ -70,14 +70,22 @@ def _cleanup_agat_logs():
                 shutil.rmtree(d, ignore_errors=True)
 
 
-def run_agat(cmd, shell=False):
+def run_agat(cmd, shell=False, quiet=False):
     """Run an AGAT command; on success clean up its log/tmp directories.
     On failure the directories are kept for debugging and the error is
-    re-raised."""
+    re-raised. quiet=True captures the command's stdout/stderr and only
+    replays it when the command fails."""
     try:
-        subprocess.run(cmd, shell=shell, check=True)
-    except subprocess.CalledProcessError:
+        if quiet:
+            subprocess.run(cmd, shell=shell, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, errors="replace")
+        else:
+            subprocess.run(cmd, shell=shell, check=True)
+    except subprocess.CalledProcessError as exc:
         print("AGAT step failed - agat_log_*/agat_tmp_* kept for debugging")
+        if quiet and exc.stdout:
+            print(exc.stdout)
         raise
     _cleanup_agat_logs()
 

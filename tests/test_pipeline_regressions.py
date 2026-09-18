@@ -100,7 +100,7 @@ class UpstreamIntegrationTests(unittest.TestCase):
         for asm in ['A','B']:
             (gffs/(asm+'.gff')).write_text('##gff-version 3\n')
             (genomes/(asm+'.fa')).write_text('>chr1\nATGATGATG\n')
-        def fake_agat(cmd):
+        def fake_agat(cmd,**kwargs):
             out=pathlib.Path(cmd[cmd.index('-o')+1])
             asm=out.stem
             if out.suffix=='.bed':

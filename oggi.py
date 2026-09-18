@@ -39,6 +39,47 @@ def _looks_like_fasta(path):
     return False
 
 
+class _ProgressBar:
+    """Minimal stdout progress bar (stdlib only). Redraws a single line on
+    a terminal; prints one line per step when output is redirected."""
+
+    def __init__(self, total, label="reduce", width=28):
+        self.total = total
+        self.label = label
+        self.width = width
+        self.done = 0
+        self._line_len = 0
+        self._tty = sys.stdout.isatty()
+        if self._tty and self.total > 0:
+            self._draw("")
+
+    def status(self, text):
+        if self._tty:
+            self._draw(text)
+
+    def advance(self, text=""):
+        self.done += 1
+        if self._tty:
+            self._draw(text)
+        else:
+            print("%s %d/%d %s" % (self.label, self.done, self.total, text))
+
+    def close(self):
+        if self._tty and self.total > 0:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    def _draw(self, text):
+        frac = min(self.done / max(self.total, 1), 1.0)
+        filled = int(round(self.width * frac))
+        line = "%s [%s%s] %d/%d %3d%% %s" % (
+            self.label, "#" * filled, "-" * (self.width - filled),
+            self.done, self.total, int(frac * 100), text)
+        sys.stdout.write("\r" + line + " " * max(self._line_len - len(line), 0))
+        sys.stdout.flush()
+        self._line_len = len(line)
+
+
 def load_manifest(manifest_path):
     """Read the reduce manifest: one 'assembly<TAB>pep<TAB>bed' per line."""
     rows = []
@@ -74,44 +115,62 @@ def run_reduce(args):
                      if f.lower().endswith(PROTEIN_EXTS + (".fna", ".fasta")))
     by_stem = {_stem(g): g for g in genomes}
     manifest = os.path.join(args.output, "assembly_manifest.tsv")
-    done = 0
+
+    # plan the work first so the total is known before anything runs
+    plan = []
+    for gff in gffs:
+        asm = _stem(gff)
+        genome = by_stem.get(asm)
+        if genome is None:
+            print("WARNING: no genome fasta matching %s" % gff)
+            continue
+        prefix = os.path.join(args.output, asm)
+        complete = all(os.path.isfile(prefix + ext) and os.path.getsize(prefix + ext) > 0
+                       for ext in ('.gff', '.pep', '.bed'))
+        plan.append((asm, gff, genome, prefix, args.skip_existing and complete))
+
+    todo = [item for item in plan if not item[4]]
+    for asm, _, _, prefix, skipped in plan:
+        if skipped:
+            print("skip existing: %s" % (prefix + ".pep"))
+    print("reduce: %d assemblies to process, %d skipped (already complete)"
+          % (len(todo), len(plan) - len(todo)))
+
+    import sub_collinearity_pre_process as scp
+    bar = _ProgressBar(len(todo))
     with open(manifest, "w") as out:
         out.write("assembly\tpep\tbed\n")
-        for gff in gffs:
-            asm = _stem(gff)
-            genome = by_stem.get(asm)
-            if genome is None:
-                print("WARNING: no genome fasta matching %s" % gff)
-                continue
-            prefix = os.path.join(args.output, asm)
-            pep_out = prefix + ".pep"
-            complete = all(os.path.isfile(prefix + ext) and os.path.getsize(prefix + ext) > 0
-                           for ext in ('.gff', '.pep', '.bed'))
-            if args.skip_existing and complete:
-                print("skip existing: %s" % pep_out)
-            else:
-                # AGAT's Bio::DB::Fasta cannot index unwrapped fasta lines
-                # (>= 65536 chars); wrap a copy when needed
-                import sub_collinearity_pre_process as scp
-                genome_for_agat = scp.wrap_fasta_for_agat(
-                    genome, prefix + ".genome.fa")
-                # extract proteins directly with -p
-                scp.run_agat(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
-                              "-o", prefix + ".gff"])
-                scp.run_agat(["agat_sp_extract_sequences.pl",
-                              "--gff", prefix + ".gff",
-                              "--fasta", genome_for_agat,
-                              "-o", pep_out, "-p"])
-                if genome_for_agat != genome and \
-                        os.path.exists(genome_for_agat):
-                    os.remove(genome_for_agat)
-                scp.run_agat(["agat_convert_sp_gff2bed.pl",
-                              "--gff", prefix + ".gff",
-                              "-o", prefix + ".bed"])
-                print("reduce: %s done" % asm)
-            out.write("%s\t%s\t%s\n" % (asm, pep_out, prefix + ".bed"))
-            done += 1
-    print("reduce done: %d assemblies -> %s" % (done, manifest))
+        for asm, gff, genome, prefix, skipped in plan:
+            if not skipped:
+                try:
+                    # AGAT's Bio::DB::Fasta cannot index unwrapped fasta lines
+                    # (>= 65536 chars); wrap a copy when needed
+                    bar.status("%s: wrap fasta" % asm)
+                    genome_for_agat = scp.wrap_fasta_for_agat(
+                        genome, prefix + ".genome.fa")
+                    bar.status("%s: longest isoform" % asm)
+                    scp.run_agat(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
+                                  "-o", prefix + ".gff"], quiet=True)
+                    # extract proteins directly with -p
+                    bar.status("%s: extract pep" % asm)
+                    scp.run_agat(["agat_sp_extract_sequences.pl",
+                                  "--gff", prefix + ".gff",
+                                  "--fasta", genome_for_agat,
+                                  "-o", prefix + ".pep", "-p"], quiet=True)
+                    if genome_for_agat != genome and \
+                            os.path.exists(genome_for_agat):
+                        os.remove(genome_for_agat)
+                    bar.status("%s: gff2bed" % asm)
+                    scp.run_agat(["agat_convert_sp_gff2bed.pl",
+                                  "--gff", prefix + ".gff",
+                                  "-o", prefix + ".bed"], quiet=True)
+                except Exception:
+                    bar.close()
+                    raise
+                bar.advance(asm)
+            out.write("%s\t%s\t%s\n" % (asm, prefix + ".pep", prefix + ".bed"))
+    bar.close()
+    print("reduce done: %d assemblies -> %s" % (len(plan), manifest))
 
 def add_identify_parser(sp):
     p = sp.add_parser("identify",
