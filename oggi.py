@@ -1,5 +1,6 @@
 import argparse
 import glob
+import hashlib
 import importlib
 import os
 import shutil
@@ -130,6 +131,21 @@ def _find_cargo():
     return None
 
 
+def _reduce_rs_cache(workspace):
+    """Writable, source-versioned build cache, including for installed wheels."""
+    digest = hashlib.sha256()
+    for pattern in ("Cargo.toml", "Cargo.lock", "*/Cargo.toml", "*/src/*.rs"):
+        for path in sorted(glob.glob(os.path.join(workspace, pattern))):
+            with open(path, "rb") as source:
+                digest.update(source.read())
+    base = os.environ.get("OGGI_REDUCE_CACHE")
+    if not base:
+        base = os.path.join(os.environ.get("LOCALAPPDATA") or
+                            os.environ.get("XDG_CACHE_HOME") or
+                            os.path.join(os.path.expanduser("~"), ".cache"), "oggi", "reduce_rs")
+    return os.path.abspath(os.path.join(base, sys.platform + "-" + digest.hexdigest()[:16]))
+
+
 def _build_reduce_rs(workspace):
     """One-off `cargo build --release`; returns the binary dir or None."""
     crate = os.path.join(workspace, "Cargo.toml")
@@ -139,13 +155,15 @@ def _build_reduce_rs(workspace):
     print("reduce --fast: building reduce_rs once (cargo build --release)")
     env = dict(os.environ)
     env["PATH"] = os.path.dirname(cargo) + os.pathsep + env.get("PATH", "")
-    proc = subprocess.run([cargo, "build", "--release", "--manifest-path", crate],
+    target = _reduce_rs_cache(workspace)
+    proc = subprocess.run([cargo, "build", "--release", "--offline", "--locked",
+                           "--manifest-path", crate, "--target-dir", target],
                           cwd=workspace, env=env, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, errors="replace")
     if proc.returncode != 0:
         print(proc.stdout)
         return None
-    return _check_engine_dir(os.path.join(workspace, "target", "release"))
+    return _check_engine_dir(os.path.join(target, "release"))
 
 
 def _build_instructions(detail=None):
@@ -186,6 +204,9 @@ def find_reduce_rs_engine(explicit=None, build=True):
         return found
     if all(shutil.which(n) for n in REDUCE_RS_BINARIES):
         return ""                       # binaries are on PATH
+    found = _check_engine_dir(os.path.join(_reduce_rs_cache(workspace), "release"))
+    if found:
+        return found
     if build:
         return _build_reduce_rs(workspace)
     return None
@@ -245,14 +266,12 @@ def add_reduce_parser(sp):
     p.add_argument("-o", "--output", required=True,
                    help="output directory for <assembly>.gff/.pep/.bed and manifest")
     p.add_argument("--skip-existing", action="store_true")
-    p.add_argument("--fast", "--fast-mode", dest="fast_mode", action="store_true",
-                   help="use the bundled Rust engine (oggi/reduce_rs) instead of "
-                        "AGAT (perl); same outputs, ~20x faster on the reduce steps")
-    p.add_argument("--no-fast", "--no-fast-mode", dest="fast_mode", action="store_false",
-                   help="force the AGAT (perl) engine even if OGGI_REDUCE_RS is set")
+    p.add_argument("--fast", dest="fast_mode", action="store_true",
+                   help="use the optional Rust engine instead of the default AGAT (Perl); "
+                        "see reduce_rs/README.md for compatibility notes")
     p.add_argument("--reduce-rs", dest="reduce_rs", default=None, metavar="DIR",
                    help="directory holding the reduce_rs binaries (default: "
-                        "$%s, then oggi/reduce_rs/target/release)" % REDUCE_RS_ENV)
+                        "$%s, then oggi/reduce_rs/target/release; only used with --fast)" % REDUCE_RS_ENV)
     p.set_defaults(func=run_reduce, fast_mode=False)
 
 

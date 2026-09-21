@@ -6,8 +6,8 @@
 //!   - lib/AGAT/OmniscientO.pm     print_omniscient_as_gff (default path),
 //!     print_level3_old_school
 //!   - share/feature_levels.yaml   type -> level classification
-//! Deliberate deviations from AGAT are listed in reduce_rs/README.md; each
-//! one is detected at parse time and reported through ParseWarnings.
+//! Remaining deviations from AGAT are listed in reduce_rs/README.md;
+//! detectable orphan/overlap conditions are reported through ParseWarnings.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -150,6 +150,10 @@ pub struct Feature {
 }
 
 impl Feature {
+    fn set_attr(&mut self, key: &str, value: String) {
+        self.attrs.retain(|(k, _)| k != key);
+        self.attrs.push((key.to_string(), value));
+    }
     pub fn attr(&self, key: &str) -> Option<&str> {
         self.attrs
             .iter()
@@ -328,7 +332,7 @@ fn link_targets(feature: &Feature) -> Vec<String> {
 }
 
 /// AGAT _create_ID: per-type sequential ids `agat-<type_lc>-<n>` (n from 1),
-/// skipping ids already in use. `used` tracks lowercase ids seen so far.
+/// skipping IDs already in use, including explicit IDs reserved from later lines.
 fn synthesize_id(
     feature: &mut Feature,
     type_lc: &str,
@@ -348,13 +352,22 @@ fn synthesize_id(
     }
 }
 
-pub fn parse_gff3<R: BufRead>(reader: R) -> Result<Omniscient, String> {
+pub fn parse_gff3<R: BufRead>(mut reader: R) -> Result<Omniscient, String> {
     let mut om = Omniscient::default();
     let mut id_counters: HashMap<String, u64> = HashMap::new();
-    let mut used_ids: HashSet<String> = HashSet::new();
+    // Reserve explicit IDs before generating any: a later explicit ID must
+    // never collide with an earlier generated one.
+    let mut input = String::new();
+    reader.read_to_string(&mut input).map_err(|e| format!("read error: {}", e))?;
+    let mut used_ids: HashSet<String> = input.lines()
+        .take_while(|l| !l.to_uppercase().starts_with("##FASTA"))
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| l.split('\t').nth(8))
+        .flat_map(|attrs| attrs.split(';'))
+        .filter_map(|a| a.trim().strip_prefix("ID="))
+        .map(|id| percent_decode(id.trim()).to_lowercase()).collect();
 
-    for line in reader.lines() {
-        let line = line.map_err(|e| format!("read error: {}", e))?;
+    for (line_number, line) in input.lines().enumerate() {
         let line = line.trim_end();
         if line.is_empty() {
             continue;
@@ -373,10 +386,10 @@ pub fn parse_gff3<R: BufRead>(reader: R) -> Result<Omniscient, String> {
         }
         let attr_field = if cols.len() > 8 { cols[8] } else { "" };
         let (start, end) = match (cols[3].parse::<u64>(), cols[4].parse::<u64>()) {
-            (Ok(s), Ok(e)) => (s, e),
+            (Ok(s), Ok(e)) if s >= 1 && e >= s => (s, e),
             _ => {
-                om.warnings.malformed_line += 1;
-                continue;
+                return Err(format!("line {}: invalid coordinates {}..{} (require 1 <= start <= end)",
+                                   line_number + 1, cols[3], cols[4]));
             }
         };
         let feature = Feature {
@@ -422,7 +435,7 @@ pub fn parse_gff3<R: BufRead>(reader: R) -> Result<Omniscient, String> {
                     continue;
                 }
                 if targets.len() > 1 {
-                    om.warnings.multi_parent += 1;
+                    return Err(format!("line {}: multiple parents on a transcript are not supported; use the Perl engine", line_number + 1));
                 }
                 let mut feature = feature;
                 if feature.attr("ID").is_none() {
@@ -452,18 +465,133 @@ pub fn parse_gff3<R: BufRead>(reader: R) -> Result<Omniscient, String> {
                     synthesize_id(&mut feature, &type_lc, &mut id_counters, &mut used_ids);
                 }
                 used_ids.insert(feature.id_lc());
-                for parent in targets {
+                for (index, parent) in targets.into_iter().enumerate() {
+                    let mut child = feature.clone();
+                    let original_parent = feature.attr("Parent").unwrap_or("")
+                        .split(',').find(|p| p.trim().to_lowercase() == parent)
+                        .unwrap_or(&parent).trim().to_string();
+                    child.set_attr("Parent", original_parent);
+                    // Exons cannot share an ID between distinct parent-specific
+                    // copies. Spread CDS/UTR features may do so, as in AGAT.
+                    if index > 0 && type_lc == "exon" {
+                        child.attrs.retain(|(k, _)| k != "ID");
+                        synthesize_id(&mut child, &type_lc, &mut id_counters, &mut used_ids);
+                    }
                     om.l3
                         .entry((type_lc.clone(), parent))
                         .or_default()
-                        .push(feature.clone());
+                        .push(child);
                 }
             }
         }
     }
 
+    repair_exons_and_utrs(&mut om, &mut id_counters, &mut used_ids);
     finalize_parse(&mut om);
     Ok(om)
+}
+
+/// AGAT clean_clone defaults: retain descriptive attributes, reset source,
+/// score and phase, and allocate an unused feature ID.
+fn derived_feature(template: &Feature, kind: &str, start: u64, end: u64,
+                   counters: &mut HashMap<String, u64>, used: &mut HashSet<String>) -> Feature {
+    let mut f = template.clone();
+    f.ftype = kind.to_string();
+    f.source = "AGAT".to_string();
+    f.score = ".".to_string();
+    f.phase = ".".to_string();
+    f.start = start;
+    f.end = end;
+    f.attrs.retain(|(k, _)| k != "ID");
+    synthesize_id(&mut f, &kind.to_lowercase(), counters, used);
+    f
+}
+
+fn repair_exons_and_utrs(om: &mut Omniscient, counters: &mut HashMap<String, u64>,
+                         used: &mut HashSet<String>) {
+    const EXON_PARTS: &[&str] = &["cds", "five_prime_utr", "three_prime_utr", "utr",
+        "3utr", "3'-utr", "5utr", "5'-utr", "sig_peptide", "start_codon",
+        "stop_codon", "stop_codon_read_through", "tss", "tts",
+        "transcription_start_site", "transcription_end_site"];
+    let mut transcripts: Vec<Feature> = om.l2.values().flatten().cloned().collect();
+    transcripts.sort_by_key(|f| f.id_lc());
+    let types = om.l3_types();
+    for transcript in transcripts {
+        let id = transcript.id_lc();
+        let key = ("exon".to_string(), id.clone());
+        let mut exons = om.l3.remove(&key).unwrap_or_default();
+        let mut parts: Vec<Feature> = EXON_PARTS.iter().flat_map(|t|
+            om.l3.get(&(t.to_string(), id.clone())).into_iter().flatten().cloned()).collect();
+        parts.sort_by_key(|f| (f.start, f.end));
+        let has_children = types.iter().any(|t| om.has_l3(t, &id));
+        if exons.is_empty() && parts.is_empty() && !has_children {
+            let mut exon = derived_feature(&transcript, "exon", transcript.start, transcript.end, counters, used);
+            exon.set_attr("Parent", transcript.attr("ID").unwrap_or("").to_string());
+            exons.push(exon);
+        }
+        // Ensure CDS/UTR intervals are covered, creating missing exons or
+        // extending existing ones. Merge adjacent/overlapping exon blocks.
+        for part in parts {
+            if let Some(exon) = exons.iter_mut().find(|e|
+                e.start <= part.end.saturating_add(1) && part.start <= e.end.saturating_add(1)) {
+                exon.start = exon.start.min(part.start);
+                exon.end = exon.end.max(part.end);
+            } else {
+                exons.push(derived_feature(&part, "exon", part.start, part.end, counters, used));
+            }
+        }
+        exons.sort_by_key(|e| (e.start, e.end));
+        let mut merged: Vec<Feature> = Vec::new();
+        for exon in exons {
+            if let Some(last) = merged.last_mut() {
+                if exon.start <= last.end.saturating_add(1) {
+                    last.end = last.end.max(exon.end);
+                    continue;
+                }
+            }
+            merged.push(exon);
+        }
+        if merged.is_empty() { continue; }
+        merged[0].start = merged[0].start.min(transcript.start);
+        let last = merged.last_mut().unwrap();
+        last.end = last.end.max(transcript.end);
+        // check_utrs: only outside the CDS envelope, never inside CDS gaps
+        // (which may represent ribosomal slippage).
+        if let Some(cds) = om.l3.get(&("cds".to_string(), id.clone())) {
+            if let (Some(left), Some(right)) = (cds.iter().map(|f| f.start).min(), cds.iter().map(|f| f.end).max()) {
+                let template = &merged[0];
+                let plus = template.strand == "+" || template.strand == "1";
+                for exon in &merged {
+                    let mut expected = Vec::new();
+                    if exon.start < left {
+                        expected.push((exon.start, exon.end.min(left - 1), if plus { "five_prime_UTR" } else { "three_prime_UTR" }));
+                    }
+                    if exon.end > right {
+                        expected.push((exon.start.max(right + 1), exon.end, if plus { "three_prime_UTR" } else { "five_prime_UTR" }));
+                    }
+                    for (start, end, kind) in expected {
+                        let mut found = false;
+                        for t in types.iter().filter(|t| t.contains("utr")) {
+                            if let Some(utrs) = om.l3.get_mut(&(t.clone(), id.clone())) {
+                                for utr in utrs {
+                                    if utr.start <= end && start <= utr.end {
+                                        utr.start = start;
+                                        utr.end = end;
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+                        if !found {
+                            let utr = derived_feature(template, kind, start, end, counters, used);
+                            om.l3.entry((kind.to_lowercase(), id.clone())).or_default().push(utr);
+                        }
+                    }
+                }
+            }
+        }
+        om.l3.insert(key, merged);
+    }
 }
 
 fn nonempty(field: &str) -> String {

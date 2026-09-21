@@ -148,6 +148,49 @@ class ReduceFastModeTests(unittest.TestCase):
         ns.update(over)
         return argparse.Namespace(**ns)
 
+    def test_only_fast_enables_rust_even_with_engine_environment(self):
+        import oggi
+        import sub_collinearity_pre_process as pre
+        parser = argparse.ArgumentParser()
+        oggi.add_reduce_parser(parser.add_subparsers())
+        argv = ['reduce', '--gff-dir', str(self.gffs), '--genome-dir', str(self.genomes), '-o', str(self.out)]
+        with patch.dict(os.environ, {oggi.REDUCE_RS_ENV: 'nonexistent'}), \
+             patch.object(oggi, 'require_reduce_rs_engine') as rust, \
+             patch.object(pre, 'run_agat') as perl:
+            args = parser.parse_args(argv)
+            self.assertFalse(args.fast_mode)
+            oggi.run_reduce(args)
+            rust.assert_not_called()
+            self.assertEqual(perl.call_count, 3)
+        self.assertTrue(parser.parse_args(argv + ['--fast']).fast_mode)
+        self.assertFalse(parser.parse_args(argv + ['--reduce-rs', 'nonexistent']).fast_mode)
+        for old in ['--no-fast', '--fast-mode', '--no-fast-mode']:
+            with self.assertRaises(SystemExit):
+                parser.parse_args(argv + [old])
+
+    def test_windows_perl_is_launched_explicitly(self):
+        import sub_collinearity_pre_process as pre
+        paths = {'perl': r'C:\perl\perl.exe', 'agat_sp_keep_longest_isoform.pl': r'C:\AGAT tools\agat_sp_keep_longest_isoform.pl'}
+        with patch.object(pre.os, 'name', 'nt'), \
+             patch.object(pre.shutil, 'which', side_effect=paths.get), \
+             patch.object(pre.subprocess, 'run') as run, \
+             patch.object(pre, '_cleanup_agat_logs'):
+            pre.run_agat(['agat_sp_keep_longest_isoform.pl', '--gff', 'file with spaces.gff'], quiet=True)
+        self.assertEqual(run.call_args.args[0], [paths['perl'], paths['agat_sp_keep_longest_isoform.pl'], '--gff', 'file with spaces.gff'])
+        self.assertFalse(run.call_args.kwargs['shell'])
+
+    def test_rust_build_cache_changes_with_source(self):
+        import oggi
+        workspace = self.root / 'sources'
+        workspace.mkdir()
+        source = workspace / 'Cargo.toml'
+        source.write_text('first')
+        with patch.dict(os.environ, {'OGGI_REDUCE_CACHE': str(self.root / 'cache')}):
+            first = oggi._reduce_rs_cache(str(workspace))
+            self.assertEqual(first, oggi._reduce_rs_cache(str(workspace)))
+            source.write_text('second')
+            self.assertNotEqual(first, oggi._reduce_rs_cache(str(workspace)))
+
     def test_fast_mode_uses_rust_engine_and_skips_fasta_wrap(self):
         import oggi
         import sub_collinearity_pre_process as pre

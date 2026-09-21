@@ -75,6 +75,16 @@ def run_agat(cmd, shell=False, quiet=False):
     On failure the directories are kept for debugging and the error is
     re-raised. quiet=True captures the command's stdout/stderr and only
     replays it when the command fails."""
+    if os.name == 'nt' and not shell and isinstance(cmd, (list, tuple)) and cmd[0].endswith('.pl'):
+        perl = shutil.which('perl')
+        script = shutil.which(cmd[0])
+        if script is None:
+            # .pl is not necessarily registered in Windows PATHEXT.
+            script = next((os.path.join(d, cmd[0]) for d in os.get_exec_path()
+                           if os.path.isfile(os.path.join(d, cmd[0]))), None)
+        if not perl or not script:
+            raise FileNotFoundError('AGAT requires perl and %s on PATH' % cmd[0])
+        cmd = [perl, script] + list(cmd[1:])
     try:
         if quiet:
             subprocess.run(cmd, shell=shell, check=True,

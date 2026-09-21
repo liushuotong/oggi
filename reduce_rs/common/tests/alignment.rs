@@ -123,7 +123,11 @@ fn agat_alignment_end_to_end() {
     assert_eq!(warnings.orphan_l1_removed, 1);
     // exon/CDS features in INPUT carry no ID -> sequential agat-<type>-N ids
     assert_eq!(warnings.missing_id, 30);
-    assert_eq!(out, EXPECTED);
+    // This fixture pins selection/order. UTR repair now adds the inferred
+    // terminal features, covered separately by repair.rs.
+    let selection: String = out.lines().filter(|line| !line.contains("\tAGAT\t"))
+        .map(|line| format!("{}\n", line)).collect();
+    assert_eq!(selection, EXPECTED);
 }
 
 #[test]

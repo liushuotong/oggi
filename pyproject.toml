@@ -66,10 +66,12 @@ py-modules = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["cluster_engine*", "orthofinder_hog*"]
+include = ["cluster_engine*", "orthofinder_hog*", "reduce_rs*"]
+exclude = ["reduce_rs.target*"]
 
 [tool.setuptools.package-data]
 orthofinder_hog = ["LICENSE", "README.md", "PROVENANCE.json"]
+reduce_rs = ["Cargo.toml", "Cargo.lock", "README.md", "*/Cargo.toml", "*/src/*.rs", "*/tests/*.rs"]
 
 [tool.setuptools.dynamic]
 version = { attr = "oggi.__version__" }

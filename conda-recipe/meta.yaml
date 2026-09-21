@@ -55,6 +55,7 @@ test:
   commands:
     - oggi --version
     - oggi --help
+    - python -c "from importlib.resources import files; assert files('reduce_rs').joinpath('Cargo.toml').is_file(); assert files('reduce_rs').joinpath('common/src/lib.rs').is_file()"
     - pip check
   requires:
     - pip

@@ -4,8 +4,9 @@
 runtime is dominated by AGAT's generic parse/validate machinery (ontology
 loading, multi-pass checks), paid three times per assembly. This workspace
 reimplements those steps in Rust with matching semantics and output layout.
-The AGAT code path in `oggi.py` is kept unchanged; wiring these binaries in
-is a separate step.
+`oggi reduce` uses AGAT/Perl by default. Only `--fast` enables these binaries;
+setting an engine path does not enable Rust. Windows Perl scripts are launched
+through an explicit Perl interpreter.
 
 ## Layout
 
@@ -29,8 +30,23 @@ cargo test                     # semantic-alignment tests in common/tests/alignm
 ```
 
 The workspace carries no third-party crates, so builds work fully offline.
-On this Windows machine the directory is pinned to the `stable-x86_64-pc-windows-gnu`
-rustup toolchain (no MSVC available); on Linux any stable toolchain works.
+On this Windows machine use `cargo +stable-x86_64-pc-windows-gnu` (no MSVC linker
+is installed); on Linux use a working stable toolchain. Python wheels and conda
+packages include these sources. Automatic builds use a source-versioned user
+cache (`OGGI_REDUCE_CACHE` overrides its base), with `--offline --locked`.
+
+## Correctness repairs (2026-09-21)
+
+- Multi-parent L3 features are expanded into copies with one surviving Parent
+  each. Exon copies receive distinct IDs; repeated parse/write cycles do not
+  duplicate CDS sequence or BED blocks. Multi-parent L2 transcripts are rejected
+  explicitly; use Perl for that unsupported layout.
+- Explicit IDs are reserved before assigning generated IDs, including explicit
+  IDs appearing later in the input.
+- Invalid coordinates (`start < 1` or `end < start`) fail with a line number.
+- Exons are synthesized from CDS/UTR intervals or childless transcripts;
+  adjacent/overlapping exon blocks are merged. Missing terminal UTRs are inferred
+  from exon/CDS boundaries with strand-aware five-/three-prime types.
 
 ## Usage (mirrors the AGAT CLI)
 
@@ -136,10 +152,10 @@ Source: `AGAT-master/bin/agat_convert_sp_gff2bed.pl`.
 
 ## Deliberate deviations from AGAT
 
-These AGAT parse-repair behaviours are **not** ported. Each is detected at
-parse time and reported on STDERR as a warning count, so a file that would
-diverge is visible. If any of these warnings is non-zero, verify the file
-against the AGAT engine before trusting the output.
+These AGAT parse-repair behaviours are not fully ported. Orphans and remaining
+overlapping non-exon L3 features produce warning counts; not every difference
+(for example a user-specific AGAT configuration) is detectable. Validate new
+annotation formats against AGAT before assuming equivalence.
 
 - `merge_loci` (overlapping-locus merging) — not implemented.
 - `check_identical_isoforms` (merging identical isoforms at parse) — not
@@ -148,21 +164,17 @@ against the AGAT engine before trusting the output.
   not implemented, overlaps counted (`overlapping_l3`).
 - Synthesis of missing parents (`check_l2_linked_to_l3`, `check_l1_linked_to_l2`)
   — orphan L2/L3 features are skipped and counted (`orphan_l2`/`orphan_l3`).
-- `create_l3_for_l2_orphan` (synthetic exon for childless transcripts) —
-  not implemented, counted (`l2_without_l3`).
-- `check_cds` / `check_utrs` (UTR inference, CDS fixes) — not implemented.
+- `check_cds` and general CDS repair are not fully implemented. Terminal UTR
+  inference is implemented; this is not a full replacement for every AGAT repair.
 - Input directives other than features are dropped: the output header is
   exactly `##gff-version 3` (no `##sequence-region` lines), embedded FASTA
   sections are discarded (`fasta_section` warning).
 - GTF input is not supported (oggi only feeds `.gff/.gff3`).
 - AGAT parallelises parsing by seqid (`cpu: 1` default = 3 chunks); this
-  implementation is single-pass single-threaded and already orders of
+  implementation is single-threaded and faster than
   magnitude faster than AGAT's default. Note AGAT's parallel mode also
   renumbers synthetic `agat-*` ids per chunk merge, so only the `cpu: 0`
   (single-process) output is byte-comparable.
-- `check_utrs` creates missing UTR features at parse time (64 on SL5.0,
-  55 of which survive keep_longest into the final GFF) — not ported; the
-  port emits only features present in the input.
 - Perl iterates some structures in random hash order, so AGAT's own output
   order is not reproducible in those cases; this port uses deterministic
   orders instead:
@@ -179,7 +191,16 @@ against the AGAT engine before trusting the output.
   those lines (54 on SL5.0). If byte-parity with AGAT is ever required for
   such a file, filter them out explicitly.
 
-## Validation results (real data, 2026-09-21)
+## Post-repair validation (2026-09-21)
+
+Post-repair SL5.0 CLI rerun: Perl 229.88 s versus Rust 11.16 s (20.60x).
+All 36,648 proteins match after newline normalization. GFF features now match
+after ignoring generated ID numbering, including the 55 previously missing
+UTRs. BED differs only by the 54 chromosome-`0` records lost by AGAT.
+17 Rust tests, 14 Python pipeline regression tests, real CLI edge fixtures,
+and wheel-source offline compilation/cache reuse passed.
+
+## Original validation before correctness repairs (2026-09-21)
 
 Assembly SL5.0 (637k-line GFF, 778 Mb genome), AGAT v1.7.0 (Strawberry Perl
 5.40.5, `--cpu 0`; the installed copy carries a one-line patch so
@@ -209,7 +230,7 @@ per-type sequential `agat-<type>-N` ids for features lacking ID; and
 runs numerically or length-first in the bigint path) — the last one affects
 gene order whenever `start|end` keys merge into ≥9-digit runs.
 
-## Validation plan (before wiring into oggi)
+## Differential validation
 
 1. `cargo test` — hand-computed alignment fixtures: selection, ties, the
    exon-before-CDS quirk, per-type independence, coordinate refits, orphan

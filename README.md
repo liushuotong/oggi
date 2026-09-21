@@ -190,10 +190,10 @@ The manifest is consumed by all later steps.
 
 #### `--fast`: bundled Rust engine (optional, ~20x faster)
 
-`--fast` (alias `--fast-mode`) swaps the three AGAT/perl steps for the Rust
-implementations in `reduce_rs/`. Same three steps, same outputs: on real data
-the `.pep` is byte-identical to AGAT `--cpu 0` and the `.gff`/`.bed` differ
-only by the deviations documented in `reduce_rs/README.md`. Measured on a
+Without `--fast`, reduce always uses AGAT/Perl. Only `--fast` swaps the three steps for the Rust
+implementations in `reduce_rs/`. The same three steps are run; on validated real data
+the `.pep` matches AGAT after newline normalization; automatic GFF IDs can
+depend on AGAT's parsing mode. See `reduce_rs/README.md` for supported inputs. Measured on a
 637k-line GFF plus a 778 Mb genome: ~200-240 s (perl) -> ~9 s (rust).
 
 ```bash
@@ -202,16 +202,20 @@ oggi reduce --gff-dir gff/ --genome-dir genomes/ -o processed/ --fast
 
 * The engine is looked up as: `--reduce-rs DIR`, then `$OGGI_REDUCE_RS`, then
   `oggi/reduce_rs/target/release/`, then `PATH`; if none is found it is built
-  once with `cargo build --release` (needs a Rust toolchain). Every lookup
+  once with `cargo build --release --offline --locked` (needs a Rust toolchain). Every lookup
   must yield all three binaries.
+* Wheels and conda's noarch Python package include the Rust workspace sources,
+  not platform binaries. Automatic compilation writes to a source-versioned
+  user cache, not site-packages; `OGGI_REDUCE_CACHE` overrides its base directory.
+  Prebuilt binaries can be supplied with `--reduce-rs DIR` together with `--fast`.
 * If no engine can be found, `--fast` stops with build instructions instead of
   silently falling back to perl, so a run that claims to be fast never quietly
   is not.
 * `--fast` also skips `wrap_fasta_for_agat`: that workaround exists only for
   `Bio::DB::Fasta`'s line-length limit, so no 778 Mb copy of the genome is
   written.
-* The default stays the AGAT/perl engine. `--no-fast` forces it explicitly,
-  e.g. to override `$OGGI_REDUCE_RS` in a script.
+* `$OGGI_REDUCE_RS` and `--reduce-rs` select a binary location only when
+  `--fast` is present. The obsolete `--no-fast` / `--fast-mode` aliases are removed.
 * Results carry no engine tag in the manifest; if you mix engines across
   assemblies, `reduce_rs` synthetic `agat-*` ids are numbered per run, so
   record which engine produced which batch.
