@@ -37,7 +37,10 @@ def make_window(bed, center_gene, up=10, down=10):
 
 def _read_blast(blast):
     if isinstance(blast, str):
-        df = pd.read_csv(blast, sep="\t", header=None)
+        try:
+            df = pd.read_csv(blast, sep="\t", header=None)
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame(columns=BLAST6_COLS)
         df.columns = BLAST6_COLS[: df.shape[1]]
     else:
         df = blast.copy()
@@ -98,7 +101,7 @@ def pairwise_comparison(windows_1, windows_2, blast=None, evalue=1e-5,
                         over_gap=3, gap_penalty=-1, mg=(40, 40),
                         pvalue=1.0, coverage_ratio=0.8,
                         center_1=None, center_2=None,
-                        min_blocks=0):
+                        min_blocks=0, backend="auto"):
     empty = (pd.DataFrame(), pd.DataFrame())
     w1 = windows_1.reset_index(drop=True)
     w2 = windows_2.reset_index(drop=True)
@@ -121,8 +124,7 @@ def pairwise_comparison(windows_1, windows_2, blast=None, evalue=1e-5,
                ("mg", "%d,%d" % tuple(mg)), ("pvalue", pvalue),
                ("coverage_ratio", coverage_ratio),
                ("grading", "%d,%d,%d" % tuple(grading))]
-    c = coli.collinearity(options, points)
-    raw_blocks = c.run()
+    raw_blocks = coli.run_blocks(options, points, backend)
 
     anchor_rows = []
     summary_rows = []
@@ -173,7 +175,7 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                                    grading=(50, 40, 25), keep_hits=10,
                                    pvalue_accept=0.2, coverage_ratio=0.8,
                                    max_pairs=None, pairs_out=None,
-                                   blocks_out=None, verbose=True):
+                                   blocks_out=None, verbose=True, backend="auto"):
     """Batch: decide whether known gene pairs lie inside collinear blocks
     (window-level sub-collinearity).
 
@@ -203,6 +205,11 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         in_collinear_block, best_block_score, best_block_pvalue,
         best_block_n, n_blocks_total
     """
+    backend = coli.resolve_backend(backend)
+    if up < 0 or down < 0 or over_gap < 1 or not 0 <= coverage_ratio <= 1:
+        raise ValueError("invalid window size, over_gap or coverage_ratio")
+    if verbose:
+        print("subcoli backend: " + backend)
     asms = [r["assembly"] for r in manifest_rows]
     bed_of = {r["assembly"]: r["bed"] for r in manifest_rows}
     members_of = {a: sorted(g for g, x in gene_to_assembly.items() if x == a)
@@ -213,8 +220,10 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
     blast = blast[blast["evalue"] <= evalue]
     hit_ids = set(blast["qseqid"].astype(str)) | set(blast["sseqid"].astype(str))
     gene_assembly = dict(gene_to_assembly)
+    bed_cache = {}
     for asm, bed_path in bed_of.items():
-        for gene in load_bed(bed_path)["gene_id"]:
+        bed_cache[asm] = load_bed(bed_path)
+        for gene in bed_cache[asm]["gene_id"]:
             if gene not in hit_ids:
                 continue
             if gene in gene_assembly and gene_assembly[gene] != asm:
@@ -225,7 +234,6 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         return gene_assembly.get(gene_id)
 
     from collections import defaultdict
-    rows_by_pair = defaultdict(list)      # (asm_a, asm_b) -> [(gene_a, gene_b, bitscore)]
     idx_by_pair = defaultdict(dict)       # (asm_a, asm_b) -> {gene_a: [(gene_b, bitscore)]}
     for r in blast.itertuples(index=False):
         qa, sa = asm_of(str(r.qseqid)), asm_of(str(r.sseqid))
@@ -234,14 +242,11 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
         if qa == sa:
             continue
         if qa < sa:
-            rows_by_pair[(qa, sa)].append((r.qseqid, r.sseqid, float(r.bitscore)))
             idx_by_pair[(qa, sa)].setdefault(r.qseqid, []).append((r.sseqid, float(r.bitscore)))
         else:
-            rows_by_pair[(sa, qa)].append((r.sseqid, r.qseqid, float(r.bitscore)))
             idx_by_pair[(sa, qa)].setdefault(r.sseqid, []).append((r.qseqid, float(r.bitscore)))
 
     # ---- per-assembly bed cache: window_of loads each bed once
-    bed_cache = {}
 
     def _bed(asm):
         if asm not in bed_cache:
@@ -254,12 +259,31 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
 
     # ---- window cache: (asm, gene) -> (win_df, {gene: loc}) ----
     win_cache = {}
+    chromosome_cache = {}
+    gene_positions = {}
+    indexed_assemblies = set()
+
+    def index_bed(asm):
+        # Match make_window's chromosome-local start sort, including tie order.
+        for chromosome, frame in _bed(asm).groupby("chr", sort=False):
+            ordered = frame.sort_values("start").reset_index(drop=True)
+            chromosome_cache[(asm, chromosome)] = ordered
+            for pos, gene_id in enumerate(ordered["gene_id"]):
+                gene_positions.setdefault((asm, gene_id), (chromosome, pos))
+        indexed_assemblies.add(asm)
 
     def window_of(asm, gene):
         key = (asm, gene)
         if key in win_cache:
             return win_cache[key]
-        win, _ = make_window(_bed(asm), gene, up=up, down=down)
+        if asm not in indexed_assemblies:
+            index_bed(asm)
+        if key not in gene_positions:
+            raise KeyError("center_gene %s not in bed" % gene)
+        chromosome, pos = gene_positions[key]
+        chrom = chromosome_cache[(asm, chromosome)]
+        win = chrom.iloc[max(0, pos-up):pos+down+1].copy().reset_index(drop=True)
+        win["loc"] = np.arange(len(win))
         loc_of = dict(zip(win["gene_id"], win["loc"]))
         win_cache[key] = (win, loc_of)
         return win_cache[key]
@@ -276,30 +300,25 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                 ("coverage_ratio", coverage_ratio),
                 ("grading", "%d,%d,%d" % tuple(grading))]
 
-    pair_names = sorted({k[0] for k in rows_by_pair} |
-                        {k[1] for k in rows_by_pair})
+    pair_names = sorted({k[0] for k in idx_by_pair} |
+                        {k[1] for k in idx_by_pair})
     for a in pair_names:
         for b in pair_names:
             if not (a < b):
                 continue
-            if (a, b) not in rows_by_pair:
+            if (a, b) not in idx_by_pair:
                 continue
             ma, mb = members_of.get(a, []), members_of.get(b, [])
             if not ma or not mb:
                 continue
             idx_ab = idx_by_pair[(a, b)]
             mb_set = set(mb)
-            hit_canon = set()
+            direct_targets = {}
             for ga in ma:
-                for s, _sc in idx_ab.get(ga, ()):
-                    if s in mb_set:
-                        hit_canon.add((ga, s) if ga < s else (s, ga))
+                direct_targets[ga] = sorted({s for s, _sc in idx_ab.get(ga, ()) if s in mb_set})
             pair_done = 0
             for ga in ma:
-                for gb in mb:
-                    canon = (ga, gb) if ga < gb else (gb, ga)
-                    if canon not in hit_canon:
-                        continue   # test only pairs with a direct blast hit
+                for gb in direct_targets[ga]:
                     if max_pairs is not None and processed >= max_pairs:
                         break
                     processed += 1
@@ -350,8 +369,7 @@ def batch_member_pair_collinearity(manifest_rows, gene_to_assembly, blast_file,
                                         "n_blocks_total": 0})
                         continue
 
-                    c = coli.collinearity(_dp_options(), points)
-                    raw_blocks = c.run()
+                    raw_blocks = coli.run_blocks(_dp_options(), points, backend)
                     anchor_pair = (loc1[ga], loc2[gb])
                     rev1 = {v: k for k, v in loc1.items()}
                     rev2 = {v: k for k, v in loc2.items()}

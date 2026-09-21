@@ -1,6 +1,63 @@
 import numpy as np
 import pandas as pd
 
+
+def resolve_backend(backend="auto"):
+    """Select a prebuilt native library; never download or compile at runtime."""
+    if backend not in ("auto", "python", "rust"):
+        raise ValueError("subcoli backend must be auto, python or rust")
+    if backend == "python":
+        return backend
+    library = _native_library()
+    if library is not None:
+        return "rust"
+    if backend == "rust":
+        raise RuntimeError("Rust subcoli library not found. Build subcoli_rs with "
+                           "cargo build --release, or set OGGI_SUBCOLI_LIB to the library file.")
+    return "python"
+
+
+def _native_library():
+    import ctypes as ct
+    import os
+    import sys
+    from pathlib import Path
+    explicit = os.environ.get("OGGI_SUBCOLI_LIB")
+    name = ("oggi_subcoli.dll" if sys.platform == "win32" else
+            "liboggi_subcoli.dylib" if sys.platform == "darwin" else "liboggi_subcoli.so")
+    root = Path(__file__).resolve().parent
+    candidates = ([Path(explicit)] if explicit else
+                  [root / name, root / "subcoli_rs" / "target" / "release" / name])
+    for path in candidates:
+        if not path.is_file():
+            continue
+        key = str(path.resolve())
+        if key in _NATIVE_CACHE:
+            return _NATIVE_CACHE[key]
+        lib = ct.CDLL(key)
+        lib.oggi_subcoli_abi.restype = ct.c_uint32
+        if lib.oggi_subcoli_abi() != 1:
+            raise RuntimeError("Unsupported subcoli Rust ABI: " + key)
+        lib.oggi_subcoli_score.argtypes = [ct.c_size_t, ct.c_void_p, ct.c_void_p,
+            ct.c_void_p, ct.c_void_p, ct.c_bool, ct.c_int64, ct.c_int64,
+            ct.c_double, ct.c_void_p]
+        lib.oggi_subcoli_score.restype = ct.c_void_p
+        lib.oggi_subcoli_free.argtypes = [ct.c_void_p]
+        lib.oggi_subcoli_free.restype = None
+        _NATIVE_CACHE[key] = lib
+        return lib
+    if explicit:
+        raise FileNotFoundError("OGGI_SUBCOLI_LIB does not exist: " + explicit)
+    return None
+
+
+_NATIVE_CACHE = {}
+
+
+def run_blocks(options, points, backend="auto"):
+    engine = resolve_backend(backend)
+    return (RustCollinearity if engine == "rust" else collinearity)(options, points).run()
+
 class collinearity:
     def __init__(self, options, points):
         # Default values
@@ -150,3 +207,100 @@ class collinearity:
         m = len(self.path)
         a = (1 - self.score / m / self.grading[0]) * (N1 - m + 1) / N * (L1 - m + 1) * (L2 - m + 1) / L1 / L2
         return round(a, 4)
+
+
+class RustCollinearity(collinearity):
+    """Native DP with array-based extraction and legacy score ordering/rounding.
+
+    Unlike the reference class, the input DataFrame is not mutated. Public block
+    frames retain its index and the same loc1/loc2 columns.
+    """
+
+    def run(self):
+        import ctypes as ct
+        n = len(self.points)
+        if not n:
+            return []
+        if not self.points.index.is_unique:
+            raise ValueError("anchor index must be unique")
+        coordinates = self.points[["loc1", "loc2"]].to_numpy()
+        if (not np.isfinite(coordinates).all() or
+                not np.equal(coordinates, np.floor(coordinates)).all() or
+                np.abs(coordinates).max() >= 2**52):
+            raise ValueError("anchor coordinates must be finite integers smaller than 2**52")
+        if not np.isfinite(self.points["grading"].to_numpy(dtype=float)).all():
+            raise ValueError("anchor grading must be finite")
+        if self.over_gap < 1 or self.grading[0] <= 0 or not np.isfinite(self.gap_penalty):
+            raise ValueError("invalid subcoli scoring parameters")
+        lib = _native_library()
+        if lib is None:
+            raise RuntimeError("Rust subcoli library not found")
+
+        class View(ct.Structure):
+            _fields_ = [("scores", ct.POINTER(ct.c_double)), ("used", ct.POINTER(ct.c_uint64)),
+                        ("offsets", ct.POINTER(ct.c_size_t)), ("paths", ct.POINTER(ct.c_size_t)),
+                        ("paths_len", ct.c_size_t)]
+
+        x = np.ascontiguousarray(coordinates[:, 0], dtype=np.int64)
+        y = np.ascontiguousarray(coordinates[:, 1], dtype=np.int64)
+        grading = np.ascontiguousarray(self.points["grading"], dtype=np.float64)
+        reverse_order = self.points.index.get_indexer(
+            self.points.sort_values(["loc1", "loc2"], ascending=[False, True]).index)
+        times = np.ones(n, dtype=np.int64)
+        data = []
+        over_length = self.over_length
+        for reverse, order in ((False, np.arange(n)), (True, reverse_order)):
+            order = np.ascontiguousarray(order, dtype=np.uintp)
+            view = View()
+            handle = lib.oggi_subcoli_score(n, x.ctypes.data, y.ctypes.data, grading.ctypes.data,
+                order.ctypes.data, reverse, self.mg1, self.mg2, self.gap_penalty, ct.byref(view))
+            if not handle:
+                raise RuntimeError("Rust subcoli scoring failed")
+            try:
+                score = np.ctypeslib.as_array(view.scores, shape=(n,)).copy()
+                used = np.ctypeslib.as_array(view.used, shape=(n,)).copy()
+                offsets = np.ctypeslib.as_array(view.offsets, shape=(n + 1,)).copy()
+                paths = np.ctypeslib.as_array(view.paths, shape=(view.paths_len,)).copy()
+            finally:
+                lib.oggi_subcoli_free(handle)
+            if (pd.api.types.is_integer_dtype(self.points["grading"].dtype)
+                    and float(self.gap_penalty).is_integer()):
+                score = score.astype(np.int64)
+            # pandas' default unstable tie order is part of the existing results.
+            ranked = pd.Series(score).sort_values(ascending=False).index.to_numpy()
+            ranked = ranked[used[ranked] >= 1]
+            active = np.zeros(n, dtype=bool)
+            active[ranked] = True
+            remaining = len(ranked)
+            cursor = 0
+            while over_length >= self.over_gap or remaining >= self.over_gap:
+                while cursor < len(ranked) and not active[ranked[cursor]]:
+                    cursor += 1
+                if cursor == len(ranked):
+                    over_length = 0
+                    break
+                head = ranked[cursor]
+                path = paths[offsets[head]:offsets[head + 1]]
+                over_length = len(path)
+                membership = np.zeros(n, dtype=bool)
+                membership[path] = True
+                selected = ranked[active[ranked] & membership[ranked]]
+                m = len(selected)
+                if over_length >= self.over_gap and m / over_length > self.coverage_ratio:
+                    active[selected] = False
+                    remaining -= m
+                    xmin, xmax = x[selected].min(), x[selected].max()
+                    ymin, ymax = y[selected].min(), y[selected].max()
+                    inside = (x >= xmin) & (x <= xmax) & (y >= ymin) & (y <= ymax)
+                    N1, N = times[inside].sum(), int(inside.sum())
+                    times[inside] += 1
+                    L1, L2 = xmax - xmin + 1, ymax - ymin + 1
+                    pv = round((1 - score[head] / m / self.grading[0]) * (N1 - m + 1) / N
+                               * (L1 - m + 1) * (L2 - m + 1) / L1 / L2, 4)
+                    if pv <= self.pvalue:
+                        block = self.points.iloc[selected].sort_values("loc1")[["loc1", "loc2"]].copy()
+                        data.append([block, pv, score[head]])
+                else:
+                    active[head] = False
+                    remaining -= 1
+        return data

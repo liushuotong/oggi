@@ -1,0 +1,12 @@
+[package]
+name = "oggi_subcoli"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-2-Clause"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+lto = true
+codegen-units = 1

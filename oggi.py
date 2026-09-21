@@ -424,6 +424,9 @@ def add_subcoli_parser(sp):
                    help="max block pvalue to call a pair collinear")
     p.add_argument("--max-pairs", type=int, default=None,
                    help="limit number of tested known pairs (debug)")
+    p.add_argument("--backend", choices=("auto", "python", "rust"), default="auto",
+                   help="subcoli engine: auto uses a prebuilt Rust library when available; "
+                        "python retains the reference implementation")
     p.add_argument("-t", "--threads", type=int, default=8)
     p.set_defaults(func=run_subcoli)
 
@@ -432,6 +435,9 @@ def run_subcoli(args):
     import sub_collinearity as sci
     import sub_collinearity_pre_process as scp
     from gene_id_utils import prepare_gene_inputs
+
+    # Resolve before expensive input preparation or DIAMOND execution.
+    backend = sci.coli.resolve_backend(getattr(args, "backend", "auto"))
 
     rows = prepare_gene_inputs(
         load_manifest(args.manifest),
@@ -478,7 +484,7 @@ def run_subcoli(args):
         rows, gene_to_assembly, blastp_out,
         up=args.up, down=args.down, evalue=args.evalue,
         pvalue_accept=args.pvalue, max_pairs=args.max_pairs,
-        pairs_out=pairs_tsv, blocks_out=blocks_tsv)
+        pairs_out=pairs_tsv, blocks_out=blocks_tsv, backend=backend)
     out_tsv = args.output + ".known_pairs.collinearity.tsv"
     pairs.to_csv(out_tsv, sep="\t", index=False)
     print("subcoli done: %d known pairs tested, %d in collinear blocks -> %s"
