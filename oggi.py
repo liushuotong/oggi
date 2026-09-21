@@ -80,6 +80,147 @@ class _ProgressBar:
         self._line_len = len(line)
 
 
+# --- reduce --fast: Rust engine (oggi/reduce_rs) ---------------------------
+# Semantic equivalents of the three AGAT scripts used by `oggi reduce`. Built
+# with `cargo build --release`; on real data the outputs are byte-identical to
+# AGAT --cpu 0 except for the documented deviations in reduce_rs/README.md.
+
+REDUCE_RS_BINARIES = (
+    "agat_sp_keep_longest_isoform",
+    "agat_sp_extract_sequences",
+    "agat_convert_sp_gff2bed",
+)
+REDUCE_RS_ENV = "OGGI_REDUCE_RS"
+
+
+def _exe(name):
+    """Platform executable name for a reduce_rs binary."""
+    return name + (".exe" if os.name == "nt" else "")
+
+
+def _workspace_reduce_rs_dir():
+    """The reduce_rs cargo workspace, a sibling of this module (oggi/reduce_rs)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "reduce_rs")
+
+
+def _check_engine_dir(path):
+    """Return the absolute engine directory when it holds all three binaries."""
+    if not path:
+        return None
+    path = os.path.abspath(path)
+    if all(os.path.isfile(os.path.join(path, _exe(n))) for n in REDUCE_RS_BINARIES):
+        return path
+    return None
+
+
+def _find_cargo():
+    """Locate cargo. rustup installs it in ~/.cargo/bin, which is often missing
+    from PATH in non-login shells, so that directory is probed explicitly."""
+    found = shutil.which("cargo")
+    if found:
+        return found
+    for base in (os.environ.get("CARGO_HOME"),
+                 os.path.join(os.path.expanduser("~"), ".cargo")):
+        if not base:
+            continue
+        for name in ("cargo", "cargo.exe"):
+            cand = os.path.join(base, "bin", name)
+            if os.path.isfile(cand):
+                return cand
+    return None
+
+
+def _build_reduce_rs(workspace):
+    """One-off `cargo build --release`; returns the binary dir or None."""
+    crate = os.path.join(workspace, "Cargo.toml")
+    cargo = _find_cargo()
+    if not (cargo and os.path.isfile(crate)):
+        return None
+    print("reduce --fast: building reduce_rs once (cargo build --release)")
+    env = dict(os.environ)
+    env["PATH"] = os.path.dirname(cargo) + os.pathsep + env.get("PATH", "")
+    proc = subprocess.run([cargo, "build", "--release", "--manifest-path", crate],
+                          cwd=workspace, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, errors="replace")
+    if proc.returncode != 0:
+        print(proc.stdout)
+        return None
+    return _check_engine_dir(os.path.join(workspace, "target", "release"))
+
+
+def _build_instructions(detail=None):
+    """Build/point-at-the-engine hint shared by the --fast error paths."""
+    return (
+        "%s"
+        "  build it with:  cargo build --release --manifest-path %s\n"
+        "  then either pass --reduce-rs <dir> or set %s=<dir> to a directory\n"
+        "  containing: %s\n"
+        "  or drop --fast to run the AGAT (perl) engine."
+        % (detail or "",
+           os.path.join(_workspace_reduce_rs_dir(), "Cargo.toml"), REDUCE_RS_ENV,
+           ", ".join(_exe(n) for n in REDUCE_RS_BINARIES)))
+
+
+def find_reduce_rs_engine(explicit=None, build=True):
+    """Locate the directory holding the three reduce_rs binaries.
+
+    An explicitly requested location (--reduce-rs or $OGGI_REDUCE_RS) is
+    authoritative: when it is given but does not hold all three binaries this
+    exits instead of quietly using a different engine. Otherwise the search is
+    <repo>/oggi/reduce_rs/target/release, PATH, then a one-off cargo build.
+    Returns None when no engine is available.
+    """
+    requested = explicit or os.environ.get(REDUCE_RS_ENV)
+    if requested:
+        found = _check_engine_dir(requested)
+        if found:
+            return found
+        sys.exit("error: %s does not hold the reduce_rs binaries: %s\n%s"
+                 % ("--reduce-rs" if explicit else "$" + REDUCE_RS_ENV,
+                    requested,
+                    _build_instructions("  each of these must exist there: %s\n"
+                                        % ", ".join(_exe(n) for n in REDUCE_RS_BINARIES))))
+    workspace = _workspace_reduce_rs_dir()
+    found = _check_engine_dir(os.path.join(workspace, "target", "release"))
+    if found:
+        return found
+    if all(shutil.which(n) for n in REDUCE_RS_BINARIES):
+        return ""                       # binaries are on PATH
+    if build:
+        return _build_reduce_rs(workspace)
+    return None
+
+
+def require_reduce_rs_engine(explicit=None):
+    """Return the engine directory for --fast, or exit with build instructions."""
+    engine = find_reduce_rs_engine(explicit)
+    if engine is not None:
+        return engine
+    sys.exit("error: --fast needs the Rust engine (oggi/reduce_rs), which was not found.\n"
+             + _build_instructions())
+
+
+def _run_reduce_fast(engine, keep_longest, extract, gff2bed, progress=None):
+    """Run one assembly through the Rust engine: (<asm>.gff, <asm>.pep, <asm>.bed).
+
+    The Rust binaries take the same arguments as the AGAT scripts; `--force` is
+    required for keep_longest because it refuses to overwrite by default (same
+    as AGAT). The genome is read directly: the wrap_fasta_for_agat workaround
+    exists only for Bio::DB::Fasta's line-length limit and is not needed here.
+    """
+    def run(argv, label):
+        if progress is not None:
+            progress.status(label)
+        exe = os.path.join(engine, _exe(argv[0])) if engine else argv[0]
+        subprocess.run([exe] + argv[1:], check=True)
+
+    run(["agat_sp_keep_longest_isoform", "--gff", extract[0], "-o", keep_longest,
+         "--force"], "keep longest isoform")
+    run(["agat_sp_extract_sequences", "--gff", keep_longest, "--fasta", extract[1],
+         "-o", extract[2], "-p"], "extract pep")
+    run(["agat_convert_sp_gff2bed", "--gff", keep_longest, "-o", gff2bed], "gff2bed")
+
+
 def load_manifest(manifest_path):
     """Read the reduce manifest: one 'assembly<TAB>pep<TAB>bed' per line."""
     rows = []
@@ -104,7 +245,42 @@ def add_reduce_parser(sp):
     p.add_argument("-o", "--output", required=True,
                    help="output directory for <assembly>.gff/.pep/.bed and manifest")
     p.add_argument("--skip-existing", action="store_true")
-    p.set_defaults(func=run_reduce)
+    p.add_argument("--fast", "--fast-mode", dest="fast_mode", action="store_true",
+                   help="use the bundled Rust engine (oggi/reduce_rs) instead of "
+                        "AGAT (perl); same outputs, ~20x faster on the reduce steps")
+    p.add_argument("--no-fast", "--no-fast-mode", dest="fast_mode", action="store_false",
+                   help="force the AGAT (perl) engine even if OGGI_REDUCE_RS is set")
+    p.add_argument("--reduce-rs", dest="reduce_rs", default=None, metavar="DIR",
+                   help="directory holding the reduce_rs binaries (default: "
+                        "$%s, then oggi/reduce_rs/target/release)" % REDUCE_RS_ENV)
+    p.set_defaults(func=run_reduce, fast_mode=False)
+
+
+def _run_reduce_agat(scp, gff, genome, prefix, progress=None):
+    """AGAT (perl) engine: (<asm>.gff, <asm>.pep, <asm>.bed). Original path."""
+    def status(text):
+        if progress is not None:
+            progress.status(text)
+    # AGAT's Bio::DB::Fasta cannot index unwrapped fasta lines (>= 65536 chars);
+    # wrap a copy when needed
+    status("wrap fasta")
+    genome_for_agat = scp.wrap_fasta_for_agat(genome, prefix + ".genome.fa")
+    try:
+        status("longest isoform")
+        scp.run_agat(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
+                      "-o", prefix + ".gff"], quiet=True)
+        # extract proteins directly with -p
+        status("extract pep")
+        scp.run_agat(["agat_sp_extract_sequences.pl",
+                      "--gff", prefix + ".gff",
+                      "--fasta", genome_for_agat,
+                      "-o", prefix + ".pep", "-p"], quiet=True)
+    finally:
+        if genome_for_agat != genome and os.path.exists(genome_for_agat):
+            os.remove(genome_for_agat)
+    status("gff2bed")
+    scp.run_agat(["agat_convert_sp_gff2bed.pl", "--gff", prefix + ".gff",
+                  "-o", prefix + ".bed"], quiet=True)
 
 
 def run_reduce(args):
@@ -115,6 +291,7 @@ def run_reduce(args):
                      if f.lower().endswith(PROTEIN_EXTS + (".fna", ".fasta")))
     by_stem = {_stem(g): g for g in genomes}
     manifest = os.path.join(args.output, "assembly_manifest.tsv")
+    fast = getattr(args, "fast_mode", False)
 
     # plan the work first so the total is known before anything runs
     plan = []
@@ -136,34 +313,30 @@ def run_reduce(args):
     print("reduce: %d assemblies to process, %d skipped (already complete)"
           % (len(todo), len(plan) - len(todo)))
 
+    # resolve the engine before touching any output, so a missing --fast
+    # engine fails immediately instead of halfway through an assembly
+    if fast:
+        engine = require_reduce_rs_engine(getattr(args, "reduce_rs", None))
+        print("reduce engine: reduce_rs (rust)%s"
+              % (" at " + engine if engine else " from PATH"))
+    else:
+        engine = None
+        print("reduce engine: AGAT (perl)")
     import sub_collinearity_pre_process as scp
+
     bar = _ProgressBar(len(todo))
     with open(manifest, "w") as out:
         out.write("assembly\tpep\tbed\n")
         for asm, gff, genome, prefix, skipped in plan:
             if not skipped:
                 try:
-                    # AGAT's Bio::DB::Fasta cannot index unwrapped fasta lines
-                    # (>= 65536 chars); wrap a copy when needed
-                    bar.status("%s: wrap fasta" % asm)
-                    genome_for_agat = scp.wrap_fasta_for_agat(
-                        genome, prefix + ".genome.fa")
-                    bar.status("%s: longest isoform" % asm)
-                    scp.run_agat(["agat_sp_keep_longest_isoform.pl", "--gff", gff,
-                                  "-o", prefix + ".gff"], quiet=True)
-                    # extract proteins directly with -p
-                    bar.status("%s: extract pep" % asm)
-                    scp.run_agat(["agat_sp_extract_sequences.pl",
-                                  "--gff", prefix + ".gff",
-                                  "--fasta", genome_for_agat,
-                                  "-o", prefix + ".pep", "-p"], quiet=True)
-                    if genome_for_agat != genome and \
-                            os.path.exists(genome_for_agat):
-                        os.remove(genome_for_agat)
-                    bar.status("%s: gff2bed" % asm)
-                    scp.run_agat(["agat_convert_sp_gff2bed.pl",
-                                  "--gff", prefix + ".gff",
-                                  "-o", prefix + ".bed"], quiet=True)
+                    if fast:
+                        _run_reduce_fast(
+                            engine, prefix + ".gff",
+                            (gff, genome, prefix + ".pep"), prefix + ".bed",
+                            progress=bar)
+                    else:
+                        _run_reduce_agat(scp, gff, genome, prefix, progress=bar)
                 except Exception:
                     bar.close()
                     raise

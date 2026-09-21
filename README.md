@@ -188,6 +188,34 @@ assembly<TAB>pep<TAB>bed
 
 The manifest is consumed by all later steps.
 
+#### `--fast`: bundled Rust engine (optional, ~20x faster)
+
+`--fast` (alias `--fast-mode`) swaps the three AGAT/perl steps for the Rust
+implementations in `reduce_rs/`. Same three steps, same outputs: on real data
+the `.pep` is byte-identical to AGAT `--cpu 0` and the `.gff`/`.bed` differ
+only by the deviations documented in `reduce_rs/README.md`. Measured on a
+637k-line GFF plus a 778 Mb genome: ~200-240 s (perl) -> ~9 s (rust).
+
+```bash
+oggi reduce --gff-dir gff/ --genome-dir genomes/ -o processed/ --fast
+```
+
+* The engine is looked up as: `--reduce-rs DIR`, then `$OGGI_REDUCE_RS`, then
+  `oggi/reduce_rs/target/release/`, then `PATH`; if none is found it is built
+  once with `cargo build --release` (needs a Rust toolchain). Every lookup
+  must yield all three binaries.
+* If no engine can be found, `--fast` stops with build instructions instead of
+  silently falling back to perl, so a run that claims to be fast never quietly
+  is not.
+* `--fast` also skips `wrap_fasta_for_agat`: that workaround exists only for
+  `Bio::DB::Fasta`'s line-length limit, so no 778 Mb copy of the genome is
+  written.
+* The default stays the AGAT/perl engine. `--no-fast` forces it explicitly,
+  e.g. to override `$OGGI_REDUCE_RS` in a script.
+* Results carry no engine tag in the manifest; if you mix engines across
+  assemblies, `reduce_rs` synthetic `agat-*` ids are numbered per run, so
+  record which engine produced which batch.
+
 ### `oggi identify`  - ?gene-family identification
 
 For each assembly (manifest row) and each HMM profile + reference protein set:

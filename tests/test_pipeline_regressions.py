@@ -2,6 +2,7 @@
 import argparse
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -127,6 +128,108 @@ class UpstreamIntegrationTests(unittest.TestCase):
         with patch.object(gfi,'identification_caculation',return_value=set()):
             with self.assertRaisesRegex(ValueError,'no family genes'):
                 gfi.main_identification([['A',str(processed/'A.pep')]],[],[],1e-5,1e-5,str(self.root/'empty'),1)
+
+
+class ReduceFastModeTests(unittest.TestCase):
+    """`oggi reduce --fast` must drive the Rust engine and never the AGAT path."""
+
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root=pathlib.Path(self.temp.name)
+        self.gffs=self.root/'gff'; self.genomes=self.root/'genomes'; self.out=self.root/'out'
+        for d in (self.gffs,self.genomes): d.mkdir()
+        (self.gffs/'A.gff').write_text('##gff-version 3\n')
+        (self.genomes/'A.fa').write_text('>chr1\n'+'ATG'*40+'\n')
+
+    def _args(self,**over):
+        ns=dict(gff_dir=str(self.gffs),genome_dir=str(self.genomes),output=str(self.out),
+                skip_existing=False,fast_mode=True,reduce_rs=None)
+        ns.update(over)
+        return argparse.Namespace(**ns)
+
+    def test_fast_mode_uses_rust_engine_and_skips_fasta_wrap(self):
+        import oggi
+        import sub_collinearity_pre_process as pre
+        calls=[]
+        def fake(cmd,shell=False,quiet=False): calls.append(cmd)
+        def fake_fast(engine,keep,extract,bed,progress=None):
+            calls.append([engine or 'PATH',keep,extract,bed])
+            pathlib.Path(keep).write_text('rust gff\n')
+            pathlib.Path(extract[2]).write_text('>A1\nMMM\n')
+            pathlib.Path(bed).write_text('chr1\t0\t9\tA1\n')
+        with patch.object(oggi,'find_reduce_rs_engine',return_value=r'X:\engine') as finder, \
+             patch.object(oggi,'_run_reduce_fast',side_effect=fake_fast), \
+             patch.object(pre,'run_agat',side_effect=fake):
+            oggi.run_reduce(self._args(reduce_rs=r'X:\explicit'))
+        # --reduce-rs must reach the discovery function
+        self.assertEqual(finder.call_args[0][0],r'X:\explicit')
+        # the perl engine must not run at all, and the Bio::DB::Fasta
+        # workaround must not rewrite the genome in fast mode
+        self.assertEqual(calls[0][0],r'X:\engine')
+        self.assertEqual(len(calls),1)
+        for ext in ('.gff','.pep','.bed'):
+            self.assertTrue((self.out/('A'+ext)).is_file())
+
+    def test_missing_engine_exits_with_build_instructions(self):
+        import oggi
+        with patch.object(oggi,'find_reduce_rs_engine',return_value=None):
+            with self.assertRaises(SystemExit) as ctx:
+                oggi.run_reduce(self._args())
+        msg=str(ctx.exception)
+        self.assertIn('--fast',msg)
+        self.assertIn('cargo build --release',msg)
+        self.assertFalse((self.out/'assembly_manifest.tsv').exists())
+
+    def test_explicit_engine_dir_is_authoritative(self):
+        """A bad --reduce-rs / $OGGI_REDUCE_RS must error, not silently use
+        whatever engine happens to be installed."""
+        import oggi
+        empty=self.root/'empty-engine'; empty.mkdir()
+        with self.assertRaises(SystemExit) as ctx:
+            oggi.find_reduce_rs_engine(explicit=str(empty))
+        self.assertIn('--reduce-rs',str(ctx.exception))
+        with patch.dict(os.environ,{oggi.REDUCE_RS_ENV:str(empty)}):
+            with self.assertRaises(SystemExit) as ctx:
+                oggi.find_reduce_rs_engine()
+        self.assertIn(oggi.REDUCE_RS_ENV,str(ctx.exception))
+        # a directory holding all three binaries is accepted
+        for n in oggi.REDUCE_RS_BINARIES:
+            (empty/oggi._exe(n)).write_text('')
+        self.assertEqual(oggi.find_reduce_rs_engine(explicit=str(empty),
+                                                    build=False),str(empty))
+
+    def test_both_engines_drive_equivalent_steps(self):
+        """--fast must issue the same three steps with the same arguments as the
+        AGAT path; the Rust engine additionally needs --force on keep_longest
+        (it refuses to overwrite by default, like AGAT does)."""
+        import oggi
+        import sub_collinearity_pre_process as pre
+        def norm(cmds):
+            out=[]
+            for c in cmds:
+                c=list(c)
+                c[0]=os.path.basename(c[0]).replace('.pl','').replace('.exe','')
+                out.append(c)
+            return out
+        fast=[]
+        def fake_run(argv,**kw):
+            fast.append(list(argv))
+            pathlib.Path(argv[argv.index('-o')+1]).write_text('x\n')
+            class R: returncode=0
+            return R()
+        with patch.object(oggi,'find_reduce_rs_engine',return_value=r'X:\eng'), \
+             patch.object(oggi.subprocess,'run',side_effect=fake_run):
+            oggi.run_reduce(self._args())
+        agat=[]
+        def fake_agat(cmd,shell=False,quiet=False):
+            agat.append(list(cmd))
+            pathlib.Path(cmd[cmd.index('-o')+1]).write_text('x\n')
+        with patch.object(pre,'run_agat',side_effect=fake_agat):
+            oggi.run_reduce(self._args(fast_mode=False))
+        self.assertTrue(any('--force' in c for c in fast))
+        strip=lambda cs:[ [a for a in c if a!='--force'] for c in cs]
+        self.assertEqual(strip(norm(fast)),norm(agat))
 
 
 if __name__=='__main__': unittest.main()
