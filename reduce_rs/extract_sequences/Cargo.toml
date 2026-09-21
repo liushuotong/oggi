@@ -1,0 +1,12 @@
+[package]
+name = "extract_sequences"
+version = "0.1.0"
+edition = "2021"
+description = "Rust reimplementation of AGAT agat_sp_extract_sequences.pl -p (v1.7.0 semantics)"
+
+[dependencies]
+gxf-common = { path = "../common" }
+
+[[bin]]
+name = "agat_sp_extract_sequences"
+path = "src/main.rs"

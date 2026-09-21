@@ -1,0 +1,12 @@
+[package]
+name = "keep_longest_isoform"
+version = "0.1.0"
+edition = "2021"
+description = "Rust reimplementation of AGAT agat_sp_keep_longest_isoform.pl (v1.7.0 semantics)"
+
+[dependencies]
+gxf-common = { path = "../common" }
+
+[[bin]]
+name = "agat_sp_keep_longest_isoform"
+path = "src/main.rs"

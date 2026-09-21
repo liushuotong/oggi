@@ -1,0 +1,9 @@
+[package]
+name = "gxf-common"
+version = "0.1.0"
+edition = "2021"
+description = "Shared GFF3 machinery replicating AGAT v1.7.0 semantics for the oggi reduce step"
+
+[lib]
+name = "gxf_common"
+path = "src/lib.rs"

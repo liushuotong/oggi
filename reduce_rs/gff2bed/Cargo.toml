@@ -1,0 +1,12 @@
+[package]
+name = "gff2bed"
+version = "0.1.0"
+edition = "2021"
+description = "Rust reimplementation of AGAT agat_convert_sp_gff2bed.pl (v1.7.0 semantics)"
+
+[dependencies]
+gxf-common = { path = "../common" }
+
+[[bin]]
+name = "agat_convert_sp_gff2bed"
+path = "src/main.rs"

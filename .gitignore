@@ -16,3 +16,7 @@ conda-bld/
 /results/
 /runs/
 /tmp/
+
+# Rust workspace (reduce_rs): keep sources, tests, Cargo manifests and
+# Cargo.lock; build artifacts stay local
+/reduce_rs/target/
