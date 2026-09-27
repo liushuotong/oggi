@@ -8,9 +8,14 @@ It can compare sequence, graph, gene-tree, and HOG methods while preserving
 every target gene and recording unresolved assignments. Auto scores describe
 internal clustering quality; they are not orthology accuracy or allele calls.
 
-This is the consolidated user guide for the current 1.0.0 codebase. BUSCO,
+This is the consolidated user guide for the current 2.0.0 codebase. BUSCO,
 species trees, clustering, metrics, HOG import/inference, and the native
 subcoli backend are documented here.
+
+Version 2.0.0 adds optional Rust acceleration for preprocessing and local
+synteny, automatic handling of gene IDs shared across assemblies, and a
+consolidated user guide. Read the [v2 migration notes](#upgrading-from-v100)
+before reusing an existing workflow or output directory.
 
 ```text
 GFF + genome -> reduce -> identify -> target-family FASTA + assembly map
@@ -1156,6 +1161,26 @@ checks stage boundaries; the CLI worker additionally enforces process timeouts.
 </details>
 
 ## Troubleshooting and migration
+
+### Upgrading from v1.0.0
+
+- `reduce` now writes `<assembly>.gff`, `<assembly>.pep`, and `<assembly>.bed`
+  without the old `_AGAT` suffix. Update scripts that construct these filenames,
+  or read the paths from the generated `assembly_manifest.tsv`. Old
+  `*_AGAT.*` outputs do not satisfy the current `--skip-existing` check; rerun
+  preprocessing in a new output directory and use its new manifest.
+- When an input protein ID occurs in multiple assemblies, `identify` and
+  `subcoli` prepare copies with `assembly_` prefixes for every input gene.
+  Use the newly generated family FASTA/map and regenerate downstream hits,
+  trees, and collinearity inputs if their IDs changed. Globally unique IDs
+  remain unchanged; original protein and BED files are preserved.
+- Rust preprocessing is opt-in through `reduce --fast`. Subcoli defaults to
+  `--backend auto`, uses a compatible prebuilt Rust library when available,
+  and otherwise uses Python. See the build instructions above.
+- Reinstall the updated checkout in your environment and check that
+  `oggi --version` reports `oggi 2.0.0`.
+
+### Common issues
 
 | Symptom | Action |
 | --- | --- |

@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 PROTEIN_EXTS = (".pep", ".fa", ".fasta", ".faa")
 GFF_EXTS = (".gff", ".gff3")
