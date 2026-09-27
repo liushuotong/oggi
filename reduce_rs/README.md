@@ -1,5 +1,10 @@
 # reduce_rs — Rust reimplementation of the AGAT steps used by `oggi reduce`
 
+For installation and pipeline commands, see the consolidated
+[OGGI user guide](../README.md#preprocessing-and-family-identification).
+This document retains detailed compatibility semantics and historical validation
+records for the optional preprocessing engine.
+
 `oggi reduce` currently shells out to three AGAT (v1.7.0) Perl scripts. Their
 runtime is dominated by AGAT's generic parse/validate machinery (ontology
 loading, multi-pass checks), paid three times per assembly. This workspace
@@ -29,9 +34,9 @@ cargo build --release          # binary: target/release/agat_sp_keep_longest_iso
 cargo test                     # semantic-alignment tests in common/tests/alignment.rs
 ```
 
-The workspace carries no third-party crates, so builds work fully offline.
-On this Windows machine use `cargo +stable-x86_64-pc-windows-gnu` (no MSVC linker
-is installed); on Linux use a working stable toolchain. Python wheels and conda
+The workspace carries no third-party crates, so builds work fully offline with
+an installed Rust toolchain. Use a stable toolchain with a working platform linker.
+Python wheels and conda
 packages include these sources. Automatic builds use a source-versioned user
 cache (`OGGI_REDUCE_CACHE` overrides its base), with `--offline --locked`.
 
@@ -171,8 +176,8 @@ annotation formats against AGAT before assuming equivalence.
   sections are discarded (`fasta_section` warning).
 - GTF input is not supported (oggi only feeds `.gff/.gff3`).
 - AGAT parallelises parsing by seqid (`cpu: 1` default = 3 chunks); this
-  implementation is single-threaded and faster than
-  magnitude faster than AGAT's default. Note AGAT's parallel mode also
+  implementation is single-threaded. The historical measurements below are
+  dataset-specific. Note AGAT's parallel mode also
   renumbers synthetic `agat-*` ids per chunk merge, so only the `cpu: 0`
   (single-process) output is byte-comparable.
 - Perl iterates some structures in random hash order, so AGAT's own output

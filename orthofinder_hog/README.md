@@ -1,5 +1,9 @@
 # Vendored OrthoFinder HOG algorithms
 
+For end-user commands and outputs, see
+[family HOG inference in the OGGI user guide](../README.md#family-hog-inference).
+This document retains the bundled source provenance and low-level adaptation API.
+
 This package copies the rooting, gene-tree reconciliation, and hierarchical
 orthogroup (HOG) algorithms from the user-supplied `OrthoFinder-master` snapshot.
 It does not require an OrthoFinder installation or the original source directory
