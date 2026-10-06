@@ -40,6 +40,10 @@ def add_parser(sp):
     p.add_argument('--orthofinder-results', help='explicit declaration: existing COMPLETE-proteome OrthoFinder Results directory')
     p.add_argument('--orthofinder-export', action='store_true',
                    help='with --orthofinder-results: accept an exported HOG set plus labelled species tree without Log.txt; record completion as unverified')
+    p.add_argument('--orthofinder-tree-method', choices=('fasttree', 'fasttree_gpu'), default='fasttree')
+    p.add_argument('--fasttree', help='fasttree_gpu executable for complete-proteome OrthoFinder inference')
+    p.add_argument('--fasttree-backend', choices=('auto', 'cpu', 'cuda'), default='auto')
+    p.add_argument('--gpu-device', type=int, default=0)
     p.add_argument('--hog-level', default='N0')
     p.add_argument('--hybrid-threads', type=int, default=1,
                    help='threads per HOG for OrthoFinder+MMseqs/CD-HIT (default 1, capped by -t)')

@@ -1,4 +1,4 @@
-"""BUSCO single-copy proteins -> per-locus MAFFT -> supermatrix -> IQ-TREE.
+"""BUSCO single-copy proteins -> per-locus MAFFT -> supermatrix -> IQ-TREE or FastTree.
 
 Only the Python standard library is needed for extraction/concatenation.
 External tools are run as argument lists, never through a shell.
@@ -309,13 +309,21 @@ def run_species_tree(args):
         raise ValueError("--threads, --jobs and --seed must be positive integers")
     if any(value != 0 and value < 1000 for value in (args.bootstrap, args.alrt)):
         raise ValueError("--bootstrap and --alrt must be 0 (disabled) or at least 1000")
+    if args.gpu_device < 0:
+        raise ValueError("--gpu-device must be nonnegative")
+    if args.fasttree_support < 0:
+        raise ValueError("--fasttree-support must be nonnegative")
+    if args.stop_after == "tree" and args.tree_method != "iqtree" and (
+            args.model != "MFP" or args.bootstrap != 1000 or args.alrt != 1000):
+        raise ValueError("--model, --bootstrap and --alrt are IQ-TREE options; "
+                         "use --fasttree-model and --fasttree-support for FastTree")
     inputs, skipped = discover_inputs(args.busco_dir, args.manifest, args.lineage)
     assemblies = list(inputs)
     outgroups = args.outgroup.split(",") if args.outgroup else []
     if outgroups and (len(set(outgroups)) != len(outgroups)
                       or set(outgroups) - set(assemblies) or len(outgroups) >= len(assemblies)):
         raise ValueError("--outgroup must contain distinct known assembly IDs and leave at least one ingroup")
-    if args.stop_after == "tree" and len(assemblies) < 4:
+    if args.stop_after == "tree" and args.tree_method == "iqtree" and len(assemblies) < 4:
         raise ValueError("IQ-TREE stage requires at least four assemblies; "
                          "use --stop-after concat for fewer assemblies")
     output = Path(args.output).expanduser().resolve()
@@ -326,12 +334,17 @@ def run_species_tree(args):
     mafft = _executable(args.mafft) if args.stop_after != "extract" else None
     trimal = (_executable(args.trimal) if args.trim == "automated1" and mafft else None)
     iqtree = (_executable(args.iqtree, ("iqtree3", "iqtree2", "iqtree"))
-              if args.stop_after == "tree" else None)
+              if args.stop_after == "tree" and args.tree_method == "iqtree" else None)
+    fasttree = None
+    if args.stop_after == "tree" and args.tree_method != "iqtree":
+        alternatives = (("fasttree_gpu",) if args.tree_method == "fasttree_gpu"
+                        else ("FastTree", "fasttree", "FastTreeMP"))
+        fasttree = _executable(args.fasttree, alternatives)
     output.mkdir(parents=True, exist_ok=True)
     summary_path = output / "run_summary.json"
     summary = dict(status="running", arguments=vars(args).copy(), assemblies=assemblies,
                    lineage=next(iter(inputs.values()))[0].name,
-                   ignored_directories=skipped, executables=dict(mafft=mafft, trimal=trimal, iqtree=iqtree))
+                   ignored_directories=skipped, tree_method=args.tree_method, executables=dict(mafft=mafft, trimal=trimal, iqtree=iqtree, fasttree=fasttree))
 
     def save():
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -351,25 +364,60 @@ def run_species_tree(args):
                 summary.update(supermatrix=str(fasta), partitions=str(partitions),
                                alignment_length=len(next(iter(read_fasta(fasta).values()))))
                 if args.stop_after == "tree":
-                    tree_dir = output / "05_iqtree"
-                    tree_dir.mkdir()
-                    prefix = tree_dir / "species_tree"
-                    command = [iqtree, "-s", str(fasta), "-p", str(partitions), "-st", "AA",
-                               "-m", args.model, "-T", str(args.threads), "--prefix", str(prefix),
-                               "-seed", str(args.seed)]
-                    if args.bootstrap:
-                        command += ["-B", str(args.bootstrap)]
-                    if args.alrt:
-                        command += ["-alrt", str(args.alrt)]
-                    if args.outgroup:
-                        command += ["-o", args.outgroup]
-                    summary["iqtree_command"] = command
-                    save()
-                    print("IQ-TREE: " + shlex.join(command), flush=True)
-                    _run(command, output / "logs" / "iqtree.log")
-                    tree = Path(str(prefix) + ".treefile")
-                    if not tree.is_file() or not tree.stat().st_size:
-                        raise RuntimeError("IQ-TREE returned without a nonempty treefile: %s" % tree)
+                    if args.tree_method == "iqtree":
+                        tree_dir = output / "05_iqtree"
+                        tree_dir.mkdir()
+                        prefix = tree_dir / "species_tree"
+                        command = [iqtree, "-s", str(fasta), "-p", str(partitions), "-st", "AA",
+                                   "-m", args.model, "-T", str(args.threads), "--prefix", str(prefix),
+                                   "-seed", str(args.seed)]
+                        if args.bootstrap:
+                            command += ["-B", str(args.bootstrap)]
+                        if args.alrt:
+                            command += ["-alrt", str(args.alrt)]
+                        if args.outgroup:
+                            command += ["-o", args.outgroup]
+                        summary["iqtree_command"] = command
+                        save()
+                        print("IQ-TREE: " + shlex.join(command), flush=True)
+                        _run(command, output / "logs" / "iqtree.log")
+                        tree = Path(str(prefix) + ".treefile")
+                        if not tree.is_file() or not tree.stat().st_size:
+                            raise RuntimeError("IQ-TREE returned without a nonempty treefile: %s" % tree)
+                    else:
+                        tree_dir = output / "05_fasttree"
+                        tree_dir.mkdir()
+                        tree = tree_dir / "species_tree.treefile"
+                        command = [fasttree]
+                        if args.tree_method == "fasttree_gpu":
+                            command += ["-backend", args.fasttree_backend,
+                                        "-gpu-device", str(args.gpu_device)]
+                        if args.fasttree_model != "JTT":
+                            command += ["-" + args.fasttree_model.lower()]
+                        if args.fasttree_gamma:
+                            command += ["-gamma"]
+                        command += (["-boot", str(args.fasttree_support)]
+                                    if args.fasttree_support else ["-nosupport"])
+                        command += ["-seed", str(args.seed), str(fasta)]
+                        summary.update(fasttree_command=command, tree_method=args.tree_method,
+                                       partitioned=False, support_method="SH-like local support" if args.fasttree_support else "disabled")
+                        save()
+                        print("FastTree: " + shlex.join(command), flush=True)
+                        _run(command, output / "logs" / "fasttree.log", tree)
+                        if not tree.is_file() or not tree.stat().st_size:
+                            raise RuntimeError("FastTree returned without a nonempty treefile: %s" % tree)
+                        from Bio import Phylo
+                        inferred = Phylo.read(tree, "newick")
+                        tips = [tip.name for tip in inferred.get_terminals()]
+                        if len(tips) != len(assemblies) or set(tips) != set(assemblies):
+                            raise ValueError("FastTree taxon IDs do not match input assemblies")
+                        if outgroups:
+                            clade = inferred.is_monophyletic([tip for tip in inferred.get_terminals()
+                                                             if tip.name in outgroups])
+                            if not clade:
+                                raise ValueError("FastTree outgroup is not monophyletic")
+                            inferred.root_with_outgroup(clade, outgroup_branch_length=0.0)
+                            Phylo.write(inferred, tree, "newick", format_branch_length="%1.10g")
                     summary["treefile"] = str(tree)
                     print("Species/assembly tree: %s" % tree, flush=True)
         summary.update(status="complete", completed_stage=args.stop_after)
@@ -397,12 +445,19 @@ def build_parser():
     parser.add_argument("--stop-after", choices=("extract", "align", "concat", "tree"), default="tree")
     parser.add_argument("--mafft", default="mafft", help="MAFFT executable")
     parser.add_argument("--trimal", default="trimal", help="trimAl executable (when trimming enabled)")
+    parser.add_argument("--tree-method", choices=("iqtree", "fasttree", "fasttree_gpu"), default="iqtree")
+    parser.add_argument("--fasttree", help="FastTree executable path/name for the selected tree method")
+    parser.add_argument("--fasttree-model", choices=("JTT", "WAG", "LG"), default="LG")
+    parser.add_argument("--fasttree-support", type=int, default=1000, help="SH-like local support resamples; 0 disables")
+    parser.add_argument("--fasttree-gamma", action="store_true", help="rescale FastTree branch lengths using Gamma20")
+    parser.add_argument("--fasttree-backend", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--gpu-device", type=int, default=0)
     parser.add_argument("--iqtree", help="IQ-TREE 2/3 executable; auto-detect iqtree3, iqtree2, iqtree")
     parser.add_argument("--model", default="MFP", help="IQ-TREE model selection/model; MFP selects per partition")
     parser.add_argument("--bootstrap", type=int, default=1000, help="ultrafast bootstrap replicates; 0 disables")
     parser.add_argument("--alrt", type=int, default=1000, help="SH-aLRT replicates; 0 disables")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--outgroup", help="comma-separated assembly IDs for IQ-TREE outgroup rooting")
+    parser.add_argument("--outgroup", help="comma-separated assembly IDs for outgroup rooting")
     return parser
 
 

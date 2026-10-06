@@ -162,7 +162,7 @@ def hogs(context):
 
 
 def _hogs(context):
-    from orthofinder_process import parse_hogs
+    from orthofinder_process import parse_hogs, write_fasttree_config
     from .hog_import import resolve_results, node_scope, import_targets
     args, runner = context['args'], context['runner']
     cached = context.get('cached_hog_source')
@@ -200,6 +200,14 @@ def _hogs(context):
                '-A', 'famsa', '-T', 'fasttree', '-I', '1.2']
         if args.tree:
             cmd += ['-s', args.tree]
+        tree_method = getattr(args, 'orthofinder_tree_method', 'fasttree')
+        if tree_method == 'fasttree_gpu':
+            cmd[cmd.index('-T') + 1] = tree_method
+            config_path = write_fasttree_config(work / 'fasttree_gpu.json',
+                                                getattr(args, 'fasttree', None),
+                                                getattr(args, 'fasttree_backend', 'auto'),
+                                                getattr(args, 'gpu_device', 0))
+            cmd += ['--config', config_path]
         runner.run(cmd, work)
         results = resolve_results(str(work / 'run'))
     source = {

@@ -75,8 +75,75 @@ class SpeciesTreeTests(unittest.TestCase):
                 pathlib.Path(str(prefix) + ".treefile").write_text(
                     "((A:0.1,B:0.1):0.2,(C:0.1,D:0.1):0.2);\n", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if "fasttree" in program:
+                kwargs["stdout"].write("((A:0.1,B:0.1)0.95:0.2,(C:0.1,D:0.1)0.9:0.2);\n")
+                kwargs["stdout"].flush()
+                return subprocess.CompletedProcess(command, 0)
             self.fail("Unexpected external command: {}".format(command))
         return fake_run
+
+    def test_fasttree_gpu_command_output_and_rooting(self):
+        self.common_markers()
+        commands = []
+        with patch.object(st.shutil, "which", side_effect=lambda name: name), \
+                patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
+            summary = st.run_species_tree(self.args(
+                "--stop-after", "tree", "--tree-method", "fasttree_gpu",
+                "--fasttree", "/custom/fasttree_gpu", "--fasttree-backend", "cuda",
+                "--gpu-device", "2", "--fasttree-gamma", "--outgroup", "A,B"))
+        cmd = commands[-1]
+        self.assertEqual(cmd[:5], ["/custom/fasttree_gpu", "-backend", "cuda", "-gpu-device", "2"])
+        self.assertIn("-lg", cmd)
+        self.assertIn("-gamma", cmd)
+        self.assertNotIn("-p", cmd)
+        self.assertFalse(any("iqtree" in cmd[0] for cmd in commands))
+        self.assertFalse(summary["partitioned"])
+        self.assertEqual(summary["status"], "complete")
+        from Bio import Phylo
+        tree = Phylo.read(summary["treefile"], "newick")
+        self.assertTrue(tree.is_monophyletic([tip for tip in tree.get_terminals() if tip.name in ("A", "B")]))
+        self.assertIn(0.95, [c.confidence for c in tree.get_nonterminals()])
+
+    def test_plain_fasttree_has_no_gpu_flags(self):
+        self.common_markers()
+        commands = []
+        with patch.object(st.shutil, "which", side_effect=lambda name: name), \
+                patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
+            st.run_species_tree(self.args("--stop-after", "tree", "--tree-method", "fasttree",
+                                         "--fasttree-model", "JTT", "--fasttree-support", "0"))
+        self.assertEqual(commands[-1][0], "FastTree")
+        self.assertIn("-nosupport", commands[-1])
+        self.assertNotIn("-backend", commands[-1])
+        self.assertNotIn("-lg", commands[-1])
+
+    def test_fasttree_rejects_iqtree_model(self):
+        self.common_markers()
+        with patch.object(st.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "IQ-TREE options"):
+                st.run_species_tree(self.args("--stop-after", "tree", "--tree-method", "fasttree_gpu",
+                                             "--model", "MFP+MERGE"))
+        run.assert_not_called()
+
+    def test_fasttree_empty_output_records_failure(self):
+        self.common_markers()
+        fake = self.external_tools([])
+        def run(command, **kwargs):
+            if "fasttree" in command[0].lower():
+                return subprocess.CompletedProcess(command, 0)
+            return fake(command, **kwargs)
+        with patch.object(st.shutil, "which", side_effect=lambda name: name), \
+                patch.object(st.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, "nonempty treefile"):
+                st.run_species_tree(self.args("--stop-after", "tree", "--tree-method", "fasttree_gpu"))
+        self.assertEqual(json.loads((self.output / "run_summary.json").read_text())["status"], "failed")
+
+    def test_fasttree_nonmonophyletic_outgroup_fails(self):
+        self.common_markers()
+        with patch.object(st.shutil, "which", side_effect=lambda name: name), \
+                patch.object(st.subprocess, "run", side_effect=self.external_tools([])):
+            with self.assertRaisesRegex(ValueError, "not monophyletic"):
+                st.run_species_tree(self.args("--stop-after", "tree", "--tree-method", "fasttree",
+                                             "--outgroup", "A,C"))
 
     def test_extract_uses_shared_busco_ids_and_assembly_headers(self):
         self.common_markers()

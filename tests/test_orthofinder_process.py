@@ -1,4 +1,6 @@
 """Wrapper contract tests; no external OrthoFinder installation required."""
+import json
+import shlex
 import pathlib
 import sys
 import tempfile
@@ -37,6 +39,37 @@ class OrthoFinderWrapperTests(unittest.TestCase):
                 patch.object(of.subprocess, "run", side_effect=fake_run):
             result = of.run_orthofinder(str(self.input), output_dir=str(output), verbose=False)
         self.assertEqual(pathlib.Path(result), output / "Results_trial")
+
+    def test_gpu_config_uses_absolute_executable_and_is_passed_to_orthofinder(self):
+        output = self.root / "gpu_run"
+        executable = self.root / "tools with spaces" / "fasttree_gpu"
+        executable.parent.mkdir()
+        executable.write_text("#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
+        def fake_run(cmd, check):
+            self.assertEqual(cmd[cmd.index("-T") + 1], "fasttree_gpu")
+            config = json.loads(pathlib.Path(cmd[cmd.index("--config") + 1]).read_text())
+            entry = config["fasttree_gpu"]
+            self.assertEqual(entry["program_type"], "tree")
+            self.assertEqual(shlex.split(entry["cmd_line"]),
+                             [str(executable.resolve()), "-backend", "cuda", "-gpu-device", "1", "INPUT", ">", "OUTPUT"])
+            (output / "Results_gpu" / "Orthogroups").mkdir(parents=True)
+        with patch.object(of.shutil, "which", side_effect=lambda name: name), \
+                patch.object(of.subprocess, "run", side_effect=fake_run):
+            of.run_orthofinder(str(self.input), output_dir=str(output), tree_program="fasttree_gpu",
+                              fasttree=str(executable), fasttree_backend="cuda", gpu_device=1, verbose=False)
+        self.assertTrue(pathlib.Path(str(output) + ".fasttree_gpu.json").is_file())
+
+    def test_gpu_requires_msa(self):
+        with self.assertRaisesRegex(ValueError, "requires --method msa"):
+            of.run_orthofinder(str(self.input), tree_program="fasttree_gpu", method="dendroblast")
+
+    def test_gpu_missing_executable_never_launches(self):
+        with patch.object(of.shutil, "which", side_effect=lambda name: None if name == "fasttree_gpu" else name), \
+                patch.object(of.subprocess, "run") as run:
+            with self.assertRaisesRegex(FileNotFoundError, "fasttree_gpu"):
+                of.run_orthofinder(str(self.input), tree_program="fasttree_gpu", verbose=False)
+            run.assert_not_called()
 
     def test_existing_output_rejected_before_launch(self):
         with patch.object(of.subprocess, "run") as run:

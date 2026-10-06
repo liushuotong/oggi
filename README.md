@@ -487,7 +487,7 @@ paths resolve from the manifest directory. Missing paths, duplicate assemblies,
 or reuse of the same run are errors. The reduce manifest cannot be passed
 directly to `species-tree` because it lacks `busco_dir`.
 
-### Alignment, concatenation, and IQ-TREE
+### Alignment, concatenation, and tree inference
 
 The default workflow groups proteins by BUSCO ID, keeps loci single-copy in
 100% of assemblies, rewrites headers to assembly IDs, aligns each locus with
@@ -507,8 +507,8 @@ amino-acid IQ-TREE inference. The original gene IDs are recorded.
 | `--mafft` / `--trimal` / `--iqtree` | Explicit executable paths/names |
 
 IQ-TREE discovery tries `iqtree3`, `iqtree2`, then `iqtree`; the executable must
-support the IQ-TREE 2/3 arguments. Full tree inference requires at least four
-assemblies; extraction/alignment/concatenation require at least two.
+support the IQ-TREE 2/3 arguments. IQ-TREE inference requires at least four
+assemblies; FastTree and extraction/alignment/concatenation require at least two.
 
 ```bash
 # Permit missing loci in up to 10% of assemblies and trim before concatenation.
@@ -524,6 +524,49 @@ oggi species-tree --manifest results/busco/busco_manifest.tsv \
 oggi species-tree --manifest results/busco/busco_manifest.tsv \
   --stop-after concat --threads 32 --jobs 8 -o results/busco_concat
 ```
+
+### FastTree and CUDA acceleration
+
+`oggi species-tree --tree-method fasttree` runs ordinary FastTree (discovery:
+`FastTree`, `fasttree`, `FastTreeMP`). `--tree-method fasttree_gpu` runs
+[fasttree_gpu](https://github.com/liushuotong/fasttree_gpu). Install it separately;
+OGGI does not download or compile CUDA code during a run:
+
+```bash
+git clone https://github.com/liushuotong/fasttree_gpu.git
+cd fasttree_gpu
+make cuda CUDA_ARCH=sm_86  # Choose the architecture for your NVIDIA GPU.
+make install PREFIX="$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Use `make cpu` and `make install DEFAULT_BACKEND=cpu PREFIX="$HOME/.local"`
+for a CPU-only installation. `--fasttree` accepts an explicit executable path.
+
+```bash
+oggi species-tree --manifest results/busco/busco_manifest.tsv \
+  --tree-method fasttree_gpu --fasttree-backend auto --gpu-device 0 \
+  --fasttree-model LG --threads 32 --jobs 8 -o results/species_tree_gpu
+```
+
+The result is `results/species_tree_gpu/05_fasttree/species_tree.treefile`;
+Newick stdout is separate from `logs/fasttree.log`. The summary records the
+executable, command, model arguments and unpartitioned inference. IQ-TREE
+remains the default. FastTree uses one protein model across the supermatrix;
+`partitions.nex` is retained for reuse but is not passed to FastTree.
+`--fasttree-model` selects `LG` (default), `JTT` or `WAG`.
+`--fasttree-support` sets SH-like local support resamples (default 1000; 0 disables);
+these values are not IQ-TREE ultrafast bootstrap supports.
+`--fasttree-gamma` enables Gamma20 branch-length rescaling.
+`--model`, `--bootstrap` and `--alrt` belong to IQ-TREE.
+`--outgroup` reroots a FastTree tree using Biopython; multiple outgroup tips must
+form a clade. `--seed` is passed to both tree engines.
+
+`--fasttree-backend auto` permits CPU fallback; `cpu` forces the CPU numerical
+path and `cuda` requires a usable NVIDIA device. CUDA still uses CPU paths for
+unsupported/small operations. `--threads` controls MAFFT parallelism; the CUDA
+FastTree implementation does not integrate OpenMP. Small datasets may see no
+speed benefit. See the upstream [GPU controls](https://github.com/liushuotong/fasttree_gpu/blob/main/docs/GPU_OPTIONS.md).
 
 Every retained locus needs at least two single-copy sequences. Relaxed
 occupancy represents missing/duplicated/fragmented hits as missing data for
@@ -774,6 +817,28 @@ oggi orthofinder --results-dir /path/to/Results_run --list-levels
 oggi orthofinder --results-dir /path/to/Results_run \
   --level all --parsed-output results/parsed_hogs
 ```
+
+To use the CUDA version for OrthoFinder gene trees:
+
+```bash
+oggi orthofinder -i proteomes/ -o results/orthofinder_gpu \
+  -M msa -A famsa -T fasttree_gpu --fasttree-backend auto --gpu-device 0
+```
+
+This requires OrthoFinder 3 with `--config` support (tested with 3.1.5).
+OGGI writes `results/orthofinder_gpu.fasttree_gpu.json`, registers the
+`fasttree_gpu` tree method with an absolute executable path and passes it via
+`--config`. Existing installations and user configuration are preserved.
+`--fasttree /path/to/fasttree_gpu` selects an explicit executable.
+OrthoFinder controls concurrent gene-tree jobs with `-a`; reduce this value if
+multiple jobs compete for GPU memory. Ordinary `-T fasttree` retains its existing
+behavior. The GPU method requires `-M msa`.
+
+For `oggi cluster` methods that infer complete-proteome HOGs (`orthofinder` and
+its hybrids), add `--orthofinder-tree-method fasttree_gpu`; `--fasttree`,
+`--fasttree-backend` and `--gpu-device` also apply. The generated configuration
+is retained under the run's `work/orthofinder` directory.
+Existing `--orthofinder-results` are imported without rerunning tree inference.
 
 Each input FASTA is one complete proteome. `-o` must be nonexistent; do not
 create it first. When omitted, a unique sibling directory is chosen. Default

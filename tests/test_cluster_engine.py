@@ -6,7 +6,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -132,6 +132,26 @@ class ClusterTests(unittest.TestCase):
         with patch.object(methods.shutil, 'which', return_value='/fake'):
             for m in ['orthofinder','orthofinder-mmseqs','orthofinder-cdhit']:
                 self.assertIn('complete proteomes', methods.applicable(m, context))
+
+    def test_complete_proteome_gpu_tree_config_is_used(self):
+        proteomes = self.root/'proteomes'
+        proteomes.mkdir()
+        for gene in self.genes:
+            data.write_fasta(proteomes/('asm'+gene+'.faa'), {gene:self.seqs[gene]})
+        args = self.args(['--proteomes', str(proteomes), '--orthofinder-tree-method', 'fasttree_gpu',
+                          '--fasttree', '/custom/fasttree_gpu', '--fasttree-backend', 'cpu'])
+        work = self.root/'work'; work.mkdir()
+        runner = Mock()
+        # Stop at result resolution so the test examines the actual inference command.
+        with patch('orthofinder_process.shutil.which', side_effect=lambda name:name), \
+                patch('cluster_engine.hog_import.resolve_results', side_effect=ValueError('probe results')):
+            with self.assertRaisesRegex(ValueError, 'probe results'):
+                methods._hogs(dict(args=args, runner=runner, work=work,
+                                   seqs=self.seqs, assemblies={g:'asm'+g for g in self.genes}))
+        command = runner.run.call_args.args[0]
+        self.assertEqual(command[command.index('-T')+1], 'fasttree_gpu')
+        config = json.loads(pathlib.Path(command[command.index('--config')+1]).read_text())
+        self.assertIn('/custom/fasttree_gpu -backend cpu', config['fasttree_gpu']['cmd_line'])
 
     def test_combination_never_crosses_hog(self):
         context = dict(args=self.args(), seqs=self.seqs)

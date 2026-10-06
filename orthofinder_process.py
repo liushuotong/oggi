@@ -6,10 +6,26 @@ import subprocess
 import re
 import shlex
 import uuid
+import json
+from pathlib import Path
 from datetime import datetime
 import pandas as pd
 
 _FASTA_SUFFIXES = (".fa", ".faa", ".fasta", ".fas", ".pep")
+
+
+def write_fasttree_config(path, executable=None, backend="auto", device=0):
+    """Register an absolute GPU command using OrthoFinder 3's --config option."""
+    if backend not in ("auto", "cpu", "cuda") or device < 0:
+        raise ValueError("invalid FastTree GPU backend or device")
+    found = shutil.which(executable or "fasttree_gpu")
+    if not found:
+        raise FileNotFoundError("fasttree_gpu executable not found: " + (executable or "fasttree_gpu"))
+    command = [str(Path(found).resolve()), "-backend", backend, "-gpu-device", str(device)]
+    config = {"fasttree_gpu": {"program_type": "tree",
+                               "cmd_line": shlex.join(command) + ' INPUT > OUTPUT'}}
+    Path(path).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    return str(Path(path).resolve())
 
 
 def prepare_input_dir(pep_files, work_dir):
@@ -50,7 +66,9 @@ def run_orthofinder(fasta_dir, threads_blast=16, threads_analysis=16,
                     inflation=1.2, output_dir=None, results_name=None,
                     step="all", method="msa", search_program="diamond",
                     verbose=True, msa_program="famsa", tree_program="fasttree",
-                    species_tree=None, split_hogs=False):
+                    species_tree=None, split_hogs=False, fasttree=None, fasttree_backend="auto", gpu_device=0):
+    if tree_program == "fasttree_gpu" and method != "msa":
+        raise ValueError("fasttree_gpu requires --method msa")
     if step != "all":
         raise ValueError("use --step all: this wrapper requires a full analysis; "
                          "-og is not supported by the supplied OrthoFinder CLI")
@@ -94,6 +112,10 @@ def run_orthofinder(fasta_dir, threads_blast=16, threads_analysis=16,
         cmd += ["-n", results_name]
     if output_dir:
         cmd += ["-o", output_dir]
+    if tree_program == "fasttree_gpu":
+        config_path = write_fasttree_config(output_dir + ".fasttree_gpu.json", fasttree,
+                                           fasttree_backend, gpu_device)
+        cmd += ["--config", config_path]
     if verbose:
         print("input proteomes: %d" % len(proteomes), flush=True)
         print(shlex.join(cmd), flush=True)
@@ -259,6 +281,9 @@ def run_orthofinder_cli():
     p.add_argument("-S", "--search", default="diamond")
     p.add_argument("-A", "--msa", default="famsa")
     p.add_argument("-T", "--tree-method", default="fasttree")
+    p.add_argument("--fasttree", help="fasttree_gpu executable path/name when -T fasttree_gpu")
+    p.add_argument("--fasttree-backend", choices=("auto", "cpu", "cuda"), default="auto")
+    p.add_argument("--gpu-device", type=int, default=0)
     p.add_argument("-s", "--species-tree", default=None, help="rooted species tree (optional)")
     p.add_argument("-y", "--split-hogs", action="store_true")
     p.add_argument("--level", default="N0",
@@ -281,7 +306,8 @@ def run_orthofinder_cli():
                               results_name=args.name, step=args.step,
                               method=args.method, search_program=args.search,
                               msa_program=args.msa, tree_program=args.tree_method,
-                              species_tree=args.species_tree, split_hogs=args.split_hogs)
+                              species_tree=args.species_tree, split_hogs=args.split_hogs,
+                              fasttree=args.fasttree, fasttree_backend=args.fasttree_backend, gpu_device=args.gpu_device)
     print("results dir : %s" % results)
     levels = available_hog_levels(results)
     print("available HOG levels: " + (", ".join(levels) or "none"))
