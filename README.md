@@ -1,4 +1,4 @@
-# OGGI
+# oggi
 
 **O**rthologous-**G**ene-**G**roup **I**nference toolkit for plant pangenome analyses.
 
