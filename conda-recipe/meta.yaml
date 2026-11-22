@@ -1,5 +1,5 @@
 {% set name = "oggi" %}
-{% set version = "2.0.0" %}
+{% set version = "3.0.0" %}
 {% set python_min = "3.11" %}
 
 package:
@@ -42,7 +42,9 @@ requirements:
     - mafft
     - trimal
     - iqtree >=2
+    - aster >=1.25
     - orthofinder
+    - brotli-python  # ete4's Python Brotli dependency via OrthoFinder
     - mcscanx
     - wgdi
     - agat

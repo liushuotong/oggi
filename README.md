@@ -8,9 +8,10 @@ It can compare sequence, graph, gene-tree, and HOG methods while preserving
 every target gene and recording unresolved assignments. Auto scores describe
 internal clustering quality; they are not orthology accuracy or allele calls.
 
-This is the consolidated user guide for the current 2.0.0 codebase. BUSCO,
-species trees, clustering, metrics, HOG import/inference, and the native
-subcoli backend are documented here.
+Starting with 3.0.0, `oggi species-tree` defaults to per-marker protein or
+CDS gene trees summarized with ASTRAL-IV. Read the
+[v3 migration notes](#upgrading-from-v200) for output paths and the
+explicit setting for the previous concatenation workflow.
 
 Version 2.0.0 adds optional Rust acceleration for preprocessing and local
 synteny, automatic handling of gene IDs shared across assemblies, and a
@@ -55,6 +56,21 @@ Use **Linux or WSL** for the complete workflow and **Python 3.11 or newer**.
 Some Python components are portable, but the full external-tool environment is
 not supported on native Windows.
 
+To download OGGI and the optional GPU tool sources together:
+
+```bash
+git clone --recurse-submodules https://github.com/liushuotong/oggi.git
+cd oggi
+```
+
+In an existing clone, run `git submodule update --init --recursive` from the
+repository root. The source checkouts are pinned under `external/fasttree_gpu`
+and `external/muscle_gpu`. For a single download, use the
+[source bundle with GPU tools](https://github.com/liushuotong/oggi/releases/download/v3.0.0/oggi-3.0.0-with-gpu-sources.tar.gz).
+If you downloaded OGGI as a GitHub-generated source ZIP, use
+the matching [FastTree GPU archive](https://github.com/liushuotong/fasttree_gpu/archive/26292feec5600004b90a311c4f2101f0d395259d.tar.gz)
+and [MUSCLE GPU archive](https://github.com/liushuotong/muscle_gpu/archive/0512711a9ebd60ebfc4392c3e593f30928ed2ccc.tar.gz).
+
 From the repository root:
 
 ```bash
@@ -87,8 +103,7 @@ file and conda recipe declare those programs:
 | HMMER, DIAMOND | `identify` | Family-profile and reference-protein searches |
 | DIAMOND | `subcoli`, `wgdi`, `mcscanx` | Protein searches for synteny |
 | BUSCO | `busco` | Completeness assessment and single-copy markers |
-| MAFFT, IQ-TREE >=2 | `species-tree` | Per-locus alignment and partitioned tree inference |
-| trimAl | `species-tree --trim automated1` | Optional alignment trimming |
+| MAFFT, trimAl, IQ-TREE >=2, ASTRAL-IV | `species-tree` | Per-locus alignment, trimming, gene trees and species-tree summary |
 | MCL | `cluster` MCL methods | Graph clustering |
 | MMseqs2, CD-HIT | Sequence and hybrid methods; wrappers | Sequence clustering |
 | OrthoFinder | Whole-proteome methods; wrapper | Whole-proteome orthology and HOGs |
@@ -130,7 +145,7 @@ conda install -c YOUR_CHANNEL -c conda-forge -c bioconda oggi
 | `oggi identify` | Assembly manifest, HMMs, reference proteins | Family FASTA and gene-to-assembly map |
 | `oggi subcoli` | Manifest and family map | Window hits, significant blocks, anchor pairs |
 | `oggi busco` | One FASTA, FASTA directory, or manifest | Per-assembly BUSCO results and tree-input manifest |
-| `oggi species-tree` | Existing BUSCO outputs | Single-copy loci, supermatrix, species/assembly tree |
+| `oggi species-tree` | Existing BUSCO outputs, optional matching CDS FASTAs | Single-copy loci, gene trees, species/assembly tree |
 | `oggi cluster` | Target-family FASTA and explicit map | Clusters, diagnostics, comparison reports |
 | `oggi orthofinder` | Complete proteomes or an existing result | OrthoFinder analysis or HOG table conversion |
 | `oggi cdhit / mmseqs / wgdi / mcscanx` | Wrapper-specific inputs | Tool-specific outputs and converted tables |
@@ -143,7 +158,7 @@ currently no `oggi tree` alias.** Also distinguish:
 
 | Interface | Meaning |
 | --- | --- |
-| `oggi species-tree` | Build a species/assembly tree from BUSCO proteins |
+| `oggi species-tree` | Build a species/assembly tree from BUSCO protein or CDS gene trees |
 | `oggi cluster --tree` / `--species-tree` | Supply an existing species/assembly tree |
 | `oggi cluster --gene-tree` | Supply an existing target-family gene tree |
 | `oggi cluster -M tree` | Cluster genes using gene-tree distances |
@@ -199,7 +214,7 @@ oggi species-tree \
   --threads 32 --jobs 8 -o results/species_tree
 ```
 
-The final tree is `results/species_tree/05_iqtree/species_tree.treefile`.
+The final tree is `results/species_tree/05_astral/species_tree.treefile`.
 It can supply `cluster --species-tree`; it cannot replace a family `--gene-tree`.
 Read `selection.json` and `SUMMARY.md` before using any selected clustering.
 
@@ -487,54 +502,63 @@ paths resolve from the manifest directory. Missing paths, duplicate assemblies,
 or reuse of the same run are errors. The reduce manifest cannot be passed
 directly to `species-tree` because it lacks `busco_dir`.
 
-### Alignment, concatenation, and tree inference
+### Per-marker gene trees and ASTRAL-IV
 
-The default workflow groups proteins by BUSCO ID, keeps loci single-copy in
-100% of assemblies, rewrites headers to assembly IDs, aligns each locus with
-MAFFT `--amino --auto`, concatenates by assembly ID, and runs partitioned
-amino-acid IQ-TREE inference. The original gene IDs are recorded.
+The default workflow groups single-copy BUSCO sequences by marker, rewrites
+headers to assembly IDs, aligns and trims each marker, and builds one IQ-TREE
+gene tree per marker. [ASTRAL-IV](https://github.com/chaoszhang/ASTER) summarizes
+the unrooted gene trees into a species or assembly tree. Install the
+[`aster` package](https://bioconda.github.io/recipes/aster/README.html) for its
+`astral4` executable if you manage the external tools separately.
 
 | Option | Default and meaning |
 | --- | --- |
-| `--min-occupancy` | `1.0`; fraction of assemblies with a single copy |
-| `--threads` / `--jobs` | `8` total threads / at most `4` concurrent MAFFT jobs |
-| `--trim` | `none`; `automated1` runs trimAl |
-| `--stop-after` | `tree`; also `extract`, `align`, `concat` |
-| `--model` | `MFP` per-partition model selection; `MFP+MERGE` can search merged partitions |
-| `--bootstrap` / `--alrt` | `1000` / `1000`; each may be `0` to disable, otherwise at least `1000` |
-| `--seed` | `42` |
-| `--outgroup` | Optional comma-separated assembly IDs |
-| `--mafft` / `--trimal` / `--iqtree` | Explicit executable paths/names |
+| `--sequence-type` | `protein`; use `cds` to build nucleotide trees from protein-guided CDS alignments |
+| `--min-occupancy` | `1.0`; minimum fraction of assemblies with a single-copy sequence |
+| `--threads` / `--jobs` | `8` total threads and at most `4` concurrent alignment or gene-tree jobs |
+| `--trim` | `gap` runs trimAl `-gt 0.1`; also accepts `automated1` or `none` |
+| `--model` | `MFP` selects a model for each gene tree; use a fixed IQ-TREE model to skip model selection |
+| `--bootstrap` / `--alrt` | `0` / `0`; enabled values must be at least `1000` |
+| `--seed` | `42` for tree inference |
+| `--outgroup` | Optional comma-separated assembly IDs used to root the final species tree |
+| `--stop-after` | `tree`; use `extract`, `align`, or `gene-trees` to stop before the species-tree summary |
+| `--mafft` / `--trimal` / `--iqtree` / `--astral` | Explicit executable paths or names |
 
-IQ-TREE discovery tries `iqtree3`, `iqtree2`, then `iqtree`; the executable must
-support the IQ-TREE 2/3 arguments. IQ-TREE inference requires at least four
-assemblies; FastTree and extraction/alignment/concatenation require at least two.
+IQ-TREE discovery tries `iqtree3`, `iqtree2`, then `iqtree`. The summary stage
+looks for ASTER's `astral4`. Each gene tree needs data for at least four
+assemblies. Each input assembly must occur in at least one gene tree for
+ASTRAL-IV to run. Lower `--min-occupancy` to allow missing markers.
 
 ```bash
-# Permit missing loci in up to 10% of assemblies and trim before concatenation.
+# Protein gene trees with at least 90% marker occupancy.
 oggi species-tree --manifest results/busco/busco_manifest.tsv \
-  --min-occupancy 0.9 --trim automated1 \
-  --threads 32 --jobs 8 -o results/species_tree_90pct
+  --min-occupancy 0.9 --threads 32 --jobs 8 -o results/species_tree_protein
 
-# Extraction needs no MAFFT, trimAl, or IQ-TREE executable.
-oggi species-tree --manifest results/busco/busco_manifest.tsv \
-  --stop-after extract -o results/busco_shared
-
-# Prepare the matrix and partitions without running IQ-TREE.
-oggi species-tree --manifest results/busco/busco_manifest.tsv \
-  --stop-after concat --threads 32 --jobs 8 -o results/busco_concat
+# Nucleotide gene trees from the same per-marker protein alignment and trim columns.
+oggi species-tree --manifest results/busco/busco_with_cds.tsv \
+  --sequence-type cds --min-occupancy 0.9 \
+  --threads 32 --jobs 8 -o results/species_tree_cds
 ```
+
+CDS mode uses the `.fna` matching each selected BUSCO `.faa`. For protein-only
+BUSCO runs, add a `cds_fasta` column to the manifest with the corresponding
+CDS FASTA for each assembly. Plain and gzip-compressed FASTA files are
+supported. The first field of each CDS FASTA header must match the original
+BUSCO protein ID. Paths resolve relative to the manifest. OGGI checks frame and
+translation under the standard genetic code before aligning proteins, then
+projects sequence gaps and trim columns to whole codons. IQ-TREE analyzes
+the resulting nucleotide alignments as DNA.
 
 ### FastTree and CUDA acceleration
 
 `oggi species-tree --tree-method fasttree` runs ordinary FastTree (discovery:
 `FastTree`, `fasttree`, `FastTreeMP`). `--tree-method fasttree_gpu` runs
-[fasttree_gpu](https://github.com/liushuotong/fasttree_gpu). Install it separately;
-OGGI does not download or compile CUDA code during a run:
+[fasttree_gpu](https://github.com/liushuotong/fasttree_gpu). Build it from the
+optional sources before running OGGI. If you cloned without submodules, first
+run `git submodule update --init -- external/fasttree_gpu`.
 
 ```bash
-git clone https://github.com/liushuotong/fasttree_gpu.git
-cd fasttree_gpu
+cd external/fasttree_gpu
 make cuda CUDA_ARCH=sm_86  # Choose the architecture for your NVIDIA GPU.
 make install PREFIX="$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
@@ -549,40 +573,32 @@ oggi species-tree --manifest results/busco/busco_manifest.tsv \
   --fasttree-model LG --threads 32 --jobs 8 -o results/species_tree_gpu
 ```
 
-The result is `results/species_tree_gpu/05_fasttree/species_tree.treefile`;
-Newick stdout is separate from `logs/fasttree.log`. The summary records the
-executable, command, model arguments and unpartitioned inference. IQ-TREE
-remains the default. FastTree uses one protein model across the supermatrix;
-`partitions.nex` is retained for reuse but is not passed to FastTree.
-`--fasttree-model` selects `LG` (default), `JTT` or `WAG`.
-`--fasttree-support` sets SH-like local support resamples (default 1000; 0 disables);
-these values are not IQ-TREE ultrafast bootstrap supports.
+The default strategy runs FastTree for each marker and writes the final species
+tree to `results/species_tree_gpu/05_astral/species_tree.treefile`.
+`--fasttree-model` selects `LG` (default), `JTT` or `WAG` for proteins.
+CDS alignments use FastTree's nucleotide GTR model. `--fasttree-support` sets
+SH-like local support resamples (default 1000; 0 disables), and
 `--fasttree-gamma` enables Gamma20 branch-length rescaling.
-`--model`, `--bootstrap` and `--alrt` belong to IQ-TREE.
-`--outgroup` reroots a FastTree tree using Biopython; multiple outgroup tips must
-form a clade. `--seed` is passed to both tree engines.
 
 `--fasttree-backend auto` permits CPU fallback; `cpu` forces the CPU numerical
 path and `cuda` requires a usable NVIDIA device. CUDA still uses CPU paths for
-unsupported/small operations. `--threads` controls MAFFT parallelism; the CUDA
-FastTree implementation does not integrate OpenMP. Small datasets may see no
-speed benefit. See the upstream [GPU controls](https://github.com/liushuotong/fasttree_gpu/blob/main/docs/GPU_OPTIONS.md).
+unsupported or small operations. GPU FastTree gene-tree jobs may compete for
+device memory. Use `--jobs` to bound concurrency.
+See the upstream [GPU controls](https://github.com/liushuotong/fasttree_gpu/blob/main/docs/GPU_OPTIONS.md).
 
-Every retained locus needs at least two single-copy sequences. Relaxed
-occupancy represents missing/duplicated/fragmented hits as missing data for
-that sample and fills the aligned segment with gaps. Samples without any retained
-amino-acid data cause an error. If no loci meet the threshold,
-`marker_occupancy.tsv` remains available for diagnosis.
+The [MUSCLE GPU](https://github.com/liushuotong/muscle_gpu) submodule provides
+the separate protein alignment tool. Follow its build instructions under
+`external/muscle_gpu` to use it directly. OGGI's species-tree alignment step
+currently invokes MAFFT.
 
-Each source locus must contain exactly one sequence. Terminal stops are removed;
-internal `*` and `U/O/J/?` become `X` with counts in `sequence_map.tsv`.
-Empty, duplicate-ID, invalid, or entirely unknown proteins fail validation.
-Alignments must preserve sample IDs and equal lengths; MAFFT must also preserve
-the input residues. Empty trimmed alignments fail.
+### Outputs and optional concatenation
 
-Each assembly becomes one tree tip, even when several assemblies belong to the
-same biological species. With no outgroup the inferred tree is unrooted.
-This is a concatenated BUSCO tree, not a gene-tree coalescent analysis.
+Each source marker must contain exactly one sequence per assembly. Terminal
+protein stops are removed; internal `*` and `U/O/J/?` become `X`.
+The sequence map records original IDs and conversions. The occupancy report
+records marker selection. Gene-tree inputs are checked for matching taxon IDs.
+Each assembly becomes one tree tip. Without an outgroup, the tree is
+interpreted as unrooted.
 
 ```text
 results/species_tree/
@@ -590,29 +606,29 @@ results/species_tree/
 ├── marker_occupancy.tsv
 ├── selected_buscos.txt
 ├── sequence_map.tsv
-├── 01_loci/*.faa
-├── 02_alignments/*.faa
-├── 03_trimmed/*.faa              # Only with trimming enabled
-├── 04_supermatrix/
-│   ├── supermatrix.faa
-│   ├── partitions.nex
-│   └── partition_lengths.tsv
-├── 05_iqtree/species_tree.treefile
+├── cds_map.tsv                     # CDS mode
+├── 01_loci/                        # Per-marker protein and optional CDS FASTA
+├── 02_alignments/                  # MAFFT and optional codon alignments
+├── 03_trimmed/                     # Trimmed alignments and CDS column maps
+├── 04_gene_trees/
+│   ├── *.treefile
+│   ├── gene_trees.nwk              # One Newick tree per retained marker
+│   └── gene_trees.tsv
+├── 05_astral/species_tree.treefile
 ├── logs/
 └── run_summary.json
 ```
 
-Outputs must be new or empty. Failed runs retain diagnostics and should be
-rerun into a new directory. `--stop-after` controls stages, not automatic resume.
-After a successful concat-only run, IQ-TREE can be launched manually:
+Use a new or empty output directory. Failed runs retain their logs and
+intermediates. `--stop-after gene-trees` keeps the Newick bundle and requires
+no ASTRAL-IV executable.
 
-```bash
-cd results/busco_concat
-mkdir -p 05_iqtree
-iqtree2 -s 04_supermatrix/supermatrix.faa -p 04_supermatrix/partitions.nex \
-  -st AA -m MFP -B 1000 -alrt 1000 -T 32 -seed 42 \
-  --prefix 05_iqtree/species_tree
-```
+`--strategy concat` runs the previous concatenated-protein workflow. It
+writes the supermatrix and NEXUS partitions under `04_supermatrix/` and
+the final tree to `05_iqtree/species_tree.treefile` or
+`05_fasttree/species_tree.treefile`. IQ-TREE uses partitioned inference and
+defaults to 1000 UFBoot and 1000 SH-aLRT replicates in this mode. Use
+`--stop-after concat` to write the supermatrix and partitions only.
 
 ## Clustering methods
 
@@ -748,7 +764,7 @@ oggi cluster -M hog-tree --target hog \
   -i results/family/gene_family.fa \
   --gene-map results/family/gene_to_assembly.tsv \
   --gene-tree /path/to/family.treefile \
-  --species-tree results/species_tree/05_iqtree/species_tree.treefile \
+  --species-tree results/species_tree/05_astral/species_tree.treefile \
   --outgroup OUTGROUP_ASSEMBLY_ID --hog-level N1 \
   -o results/family_hogs
 ```
@@ -1227,6 +1243,15 @@ checks stage boundaries; the CLI worker additionally enforces process timeouts.
 
 ## Troubleshooting and migration
 
+### Upgrading from v2.0.0
+
+The default `oggi species-tree` now needs ASTER's `astral4` executable and
+writes `05_astral/species_tree.treefile` under the output directory. TrimAl
+runs by default. Update scripts that consume the species tree to use the new
+path, or pass `--strategy concat` to keep the previous concatenated workflow
+and output paths. Use `conda env update -n oggi -f environment.yml` to update
+an existing source environment.
+
 ### Upgrading from v1.0.0
 
 - `reduce` now writes `<assembly>.gff`, `<assembly>.pep`, and `<assembly>.bed`
@@ -1243,7 +1268,7 @@ checks stage boundaries; the CLI worker additionally enforces process timeouts.
   `--backend auto`, uses a compatible prebuilt Rust library when available,
   and otherwise uses Python. See the build instructions above.
 - Reinstall the updated checkout in your environment and check that
-  `oggi --version` reports `oggi 2.0.0`.
+  `oggi --version` reports `oggi 3.0.0`.
 
 ### Common issues
 

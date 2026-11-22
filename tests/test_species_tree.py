@@ -1,4 +1,5 @@
 """BUSCO species-tree contracts; external phylogeny programs are simulated."""
+import gzip
 import json
 import pathlib
 import subprocess
@@ -66,15 +67,26 @@ class SpeciesTreeTests(unittest.TestCase):
                 target.write_text("".join(
                     ">{}\n{}\n".format(name, sequence[:-1])
                     for name, sequence in sequences.items()), encoding="utf-8")
+                if "-colnumbering" in command:
+                    n = len(next(iter(sequences.values()))) - 1
+                    kwargs["stdout"].write("#ColumnsMap\t" + ", ".join(map(str, range(n))) + "\n")
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
             if "iqtree" in program:
                 prefix_flag = next(flag for flag in ("--prefix", "-pre", "-prefix")
                                    if flag in command)
                 prefix = pathlib.Path(command[command.index(prefix_flag) + 1])
                 prefix.parent.mkdir(parents=True, exist_ok=True)
+                records = st.read_fasta(command[command.index("-s") + 1])
                 pathlib.Path(str(prefix) + ".treefile").write_text(
-                    "((A:0.1,B:0.1):0.2,(C:0.1,D:0.1):0.2);\n", encoding="utf-8")
+                    "(" + ",".join(name + ":0.1" for name in records) + ");\n", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if program == "astral4":
+                from Bio import Phylo
+                taxa = sorted({tip.name for tree in Phylo.parse(command[-1], "newick")
+                               for tip in tree.get_terminals()})
+                target = pathlib.Path(command[command.index("-o") + 1])
+                target.write_text("(" + ",".join(taxa) + ");\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0)
             if "fasttree" in program:
                 kwargs["stdout"].write("((A:0.1,B:0.1)0.95:0.2,(C:0.1,D:0.1)0.9:0.2);\n")
                 kwargs["stdout"].flush()
@@ -88,7 +100,7 @@ class SpeciesTreeTests(unittest.TestCase):
         with patch.object(st.shutil, "which", side_effect=lambda name: name), \
                 patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
             summary = st.run_species_tree(self.args(
-                "--stop-after", "tree", "--tree-method", "fasttree_gpu",
+                "--stop-after", "tree", "--strategy", "concat", "--tree-method", "fasttree_gpu",
                 "--fasttree", "/custom/fasttree_gpu", "--fasttree-backend", "cuda",
                 "--gpu-device", "2", "--fasttree-gamma", "--outgroup", "A,B"))
         cmd = commands[-1]
@@ -109,7 +121,7 @@ class SpeciesTreeTests(unittest.TestCase):
         commands = []
         with patch.object(st.shutil, "which", side_effect=lambda name: name), \
                 patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
-            st.run_species_tree(self.args("--stop-after", "tree", "--tree-method", "fasttree",
+            st.run_species_tree(self.args("--stop-after", "tree", "--strategy", "concat", "--tree-method", "fasttree",
                                          "--fasttree-model", "JTT", "--fasttree-support", "0"))
         self.assertEqual(commands[-1][0], "FastTree")
         self.assertIn("-nosupport", commands[-1])
@@ -142,7 +154,7 @@ class SpeciesTreeTests(unittest.TestCase):
         with patch.object(st.shutil, "which", side_effect=lambda name: name), \
                 patch.object(st.subprocess, "run", side_effect=self.external_tools([])):
             with self.assertRaisesRegex(ValueError, "not monophyletic"):
-                st.run_species_tree(self.args("--stop-after", "tree", "--tree-method", "fasttree",
+                st.run_species_tree(self.args("--stop-after", "tree", "--strategy", "concat", "--tree-method", "fasttree",
                                              "--outgroup", "A,C"))
 
     def test_extract_uses_shared_busco_ids_and_assembly_headers(self):
@@ -327,7 +339,7 @@ class SpeciesTreeTests(unittest.TestCase):
         commands = []
         with patch.object(st.shutil, "which", side_effect=lambda program: program), \
                 patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
-            st.run_species_tree(self.args("--stop-after", "tree", "--trim", "automated1",
+            st.run_species_tree(self.args("--stop-after", "tree", "--strategy", "concat", "--trim", "automated1",
                                           "--threads", "4", "--jobs", "2"))
         matrix = self.output / "04_supermatrix" / "supermatrix.faa"
         partitions = self.output / "04_supermatrix" / "partitions.nex"
@@ -342,6 +354,72 @@ class SpeciesTreeTests(unittest.TestCase):
             self.assertIn(flag, command)
             self.assertEqual(command[command.index(flag) + 1], value)
         self.assertEqual(len(list(self.output.rglob("*.treefile"))), 1)
+
+    def test_default_builds_one_protein_tree_per_locus_then_summarizes(self):
+        self.common_markers()
+        for assembly in ("A", "B", "C", "D"):
+            self.marker(assembly, "200at33090", "MGK")
+        for assembly in ("A", "B", "C"):
+            self.marker(assembly, "300at33090")
+        commands = []
+        with patch.object(st.shutil, "which", side_effect=lambda name: name), \
+                patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
+            summary = st.run_species_tree(self.args("--stop-after", "tree", "--min-occupancy", "0.75",
+                                                   "--threads", "4", "--jobs", "2"))
+        self.assertEqual(summary["strategy"], "astral")
+        self.assertEqual(summary["gene_tree_count"], 2)
+        self.assertTrue(pathlib.Path(summary["treefile"]).is_file())
+        self.assertFalse((self.output / "04_supermatrix").exists())
+        self.assertEqual(len(pathlib.Path(summary["gene_trees"]).read_text().splitlines()), 2)
+        gene_commands = [cmd for cmd in commands if cmd[0] == "iqtree3"]
+        self.assertEqual(len(gene_commands), 2)
+        for command in gene_commands:
+            self.assertEqual(command[command.index("-st") + 1], "AA")
+            self.assertEqual(command[command.index("-T") + 1], "2")
+            self.assertTrue({"-p", "-B", "-alrt"}.isdisjoint(command))
+        self.assertEqual(commands[-1][0], "astral4")
+
+    def test_cds_uses_matching_ids_and_the_protein_trim_columns(self):
+        marker = "100at33090"
+        for assembly in ("A", "B", "C", "D"):
+            gene = "original_%s_%s" % (assembly, marker)
+            peptide, coding = ("MLKT", "ATGCTGAAAACCTAA") if assembly == "B" else ("MKT", "ATGAAAACCTAA")
+            faa = self.marker(assembly, marker, peptide)
+            if assembly == "B":
+                with gzip.open(self.root / "B.cds.fa.gz", "wt") as handle:
+                    handle.write(">unused\nATG\n>%s description\n%s\n" % (gene, coding))
+            else:
+                faa.with_suffix(".fna").write_text(">%s\n%s\n" % (gene, coding))
+        manifest = self.root / "cds.tsv"
+        manifest.write_text("assembly\tbusco_dir\tcds_fasta\n"
+                            "A\tbusco/A\t\nB\tbusco/B\tB.cds.fa.gz\nC\tbusco/C\t\nD\tbusco/D\t\n")
+        args = st.build_parser().parse_args(["--manifest", str(manifest), "-o", str(self.output),
+                                            "--sequence-type", "cds", "--stop-after", "gene-trees"])
+        commands = []
+        with patch.object(st.shutil, "which", side_effect=lambda name: name) as which, \
+                patch.object(st.subprocess, "run", side_effect=self.external_tools(commands)):
+            summary = st.run_species_tree(args)
+        self.assertNotIn(("astral4",), [call.args for call in which.call_args_list])
+        self.assertEqual(summary["gene_tree_count"], 1)
+        self.assertNotIn("treefile", summary)
+        self.assertIn("-colnumbering", commands[1])
+        self.assertIn("DNA", commands[-1])
+        self.assertEqual(st.read_fasta(self.output / "02_alignments" / (marker + ".fna"))["A"], "ATGAAAACC---")
+        self.assertEqual(st.read_fasta(self.output / "03_trimmed" / (marker + ".fna")), {
+            "A": "ATGAAAACC", "B": "ATGCTGAAA", "C": "ATGAAAACC", "D": "ATGAAAACC"})
+
+    def test_cds_translation_mismatch_fails_before_alignment(self):
+        self.common_markers()
+        for assembly in ("A", "B", "C", "D"):
+            faa = self.marker(assembly, "100at33090", "MK")
+            coding = "ATGGAA" if assembly == "D" else "ATGAAA"
+            faa.with_suffix(".fna").write_text(">original_%s_100at33090\n%s\n" % (assembly, coding))
+        with patch.object(st.shutil, "which", side_effect=lambda name: name), \
+                patch.object(st.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "translation mismatch at codon 2"):
+                st.run_species_tree(self.args("--stop-after", "align", "--sequence-type", "cds"))
+        run.assert_not_called()
+        self.assertEqual(json.loads((self.output / "run_summary.json").read_text())["status"], "failed")
 
 
 if __name__ == "__main__":

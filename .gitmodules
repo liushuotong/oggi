@@ -1,0 +1,6 @@
+[submodule "external/fasttree_gpu"]
+	path = external/fasttree_gpu
+	url = https://github.com/liushuotong/fasttree_gpu.git
+[submodule "external/muscle_gpu"]
+	path = external/muscle_gpu
+	url = https://github.com/liushuotong/muscle_gpu.git

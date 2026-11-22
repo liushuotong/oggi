@@ -4,7 +4,7 @@
 # Activate: conda activate oggi
 # Verify:   python -c "import pandas, numpy, Bio" && \
 #           which diamond hmmsearch cd-hit mcl mmseqs orthofinder wgdi MCScanX \
-#                agat_sp_keep_longest_isoform.pl busco mafft trimal
+#                agat_sp_keep_longest_isoform.pl busco mafft trimal iqtree astral4
 #           busco --version
 #
 # Notes:
@@ -43,11 +43,13 @@ dependencies:
   # ---- BUSCO protein alignments and species/assembly phylogeny ----
   - busco                   # oggi busco: per-assembly completeness and single-copy outputs
   - mafft                   # oggi species-tree: per-BUSCO protein alignment
-  - trimal                  # oggi species-tree --trim automated1 (optional at runtime)
-  - iqtree>=2               # oggi species-tree: partitioned maximum-likelihood tree
+  - trimal                  # oggi species-tree: trim per-locus alignments
+  - iqtree>=2               # oggi species-tree: maximum-likelihood gene trees
+  - aster>=1.25             # oggi species-tree: ASTRAL-IV species-tree summary
 
   # ---- gene family / collinearity tools ----
   - orthofinder             # oggi orthofinder (v3, bundles diamond/mcl/fastme)
+  - brotli-python           # ete4's Python Brotli dependency via OrthoFinder
   - mcscanx                 # oggi mcscanx (MCScanX + Duplicate_gene_classifier)
   - wgdi                    # oggi wgdi (-icl sub-collinearity)
 
